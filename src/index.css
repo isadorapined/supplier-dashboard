@@ -1,0 +1,59 @@
+/* Data Leaf tokens. Kept identical to .claude/skills/data-leaf-brand/tokens.css
+   — that file is the brand source; this import-free copy is what ships. */
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background: var(--dl-bg);
+  }
+
+  body {
+    margin: 0;
+    background: var(--dl-bg);
+    color: var(--dl-text);
+    font-family: var(--dl-font-body);
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--dl-font-heading);
+    font-weight: 500;
+    margin: 0;
+  }
+
+  /* Figures read as headings, per the brand: DM Sans 500. */
+  .dl-figure {
+    font-family: var(--dl-font-heading);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--dl-deep-teal);
+    outline-offset: 2px;
+  }
+
+  /* Tailwind's preflight ships a gray-400 placeholder and a blue-500 ring
+     default. Neither is a Data Leaf colour, so both are replaced here rather
+     than left to be overridden utility by utility. */
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in srgb, var(--dl-deep-space) 60%, transparent);
+    opacity: 1;
+  }
+
+  *,
+  ::before,
+  ::after {
+    --tw-ring-color: var(--dl-deep-teal);
+    --tw-ring-offset-color: var(--dl-mint-cream);
+  }
+}
