@@ -1,0 +1,25 @@
+/* ============================================
+   Data Leaf — Design Tokens
+   Generated for Claude Code builds
+   ============================================ */
+
+:root {
+  /* ---- Palette ---- */
+  --dl-mint-cream:   #EEF4F0;
+  --dl-silver:       #DAD9D9;
+  --dl-deep-space:   #0B3142;
+  --dl-deep-teal:    #37663E;
+  --dl-burnt-clay:   #B35634;
+
+  /* ---- Semantic mapping ---- */
+  --dl-bg:           var(--dl-mint-cream);
+  --dl-bg-alt:       var(--dl-silver);
+  --dl-text:         var(--dl-deep-space);
+  --dl-text-dark-bg: var(--dl-mint-cream);
+  --dl-secondary:    var(--dl-deep-teal);
+  --dl-cta:          var(--dl-burnt-clay);
+
+  /* ---- Typography ---- */
+  --dl-font-heading: 'DM Sans', sans-serif;
+  --dl-font-body:    'Inter', sans-serif;
+}
