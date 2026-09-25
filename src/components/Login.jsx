@@ -5,8 +5,10 @@ import { Button, ErrorMessage, Field, inputClass, Panel } from './ui.jsx'
 // View 1. No supplier data is fetched here or anywhere before a session
 // exists — App renders this view for every logged-out visitor, whatever the
 // URL. There is no sign-up link and no forgot-password link: accounts are
-// created by the builder in Supabase, and signup is off at the Auth level.
-export default function Login() {
+// created by the Admin in the Admin Panel, and a forgotten password is reset
+// there too. `notice` explains why a login was just signed out (not on the
+// team, or deactivated).
+export default function Login({ notice = '', onSignIn }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -17,6 +19,7 @@ export default function Login() {
     if (busy) return
     setBusy(true)
     setError('')
+    onSignIn?.()
 
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim(),
@@ -39,6 +42,12 @@ export default function Login() {
         <p className="mb-8 font-heading text-2xl font-medium text-teal">Data Leaf</p>
         <Panel as="div" className="p-6">
           <h1 className="mb-6 text-xl text-deep">Supplier Review Dashboard</h1>
+
+          {notice && !error ? (
+            <p role="status" className="mb-4 text-sm text-clay">
+              {notice}
+            </p>
+          ) : null}
 
           {configError ? (
             <ErrorMessage>{configError}</ErrorMessage>

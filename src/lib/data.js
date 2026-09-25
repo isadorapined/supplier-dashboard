@@ -48,3 +48,51 @@ export async function setSubmissionStatus({ submissionId, newStatus, reason }) {
   })
   if (error) throw error
 }
+
+export const ROLE_LABELS = { ehs: 'EHS', esg: 'ESG', procurement: 'Procurement' }
+
+// The signed-in user's own user_roles row — the only row RLS lets them read.
+// Read on every load rather than once, so a role change or deactivation by
+// the Admin applies on the person's next action.
+//
+// getUser() asks Supabase Auth about the session rather than trusting the
+// stored token, so a login the Admin has deactivated (banned) comes back
+// 'locked' even while its old token has not expired. 'none' means the login
+// is not on the team at all — for example a supplier's portal login.
+export async function fetchMyRole() {
+  const { data: auth, error: authError } = await supabase.auth.getUser()
+  if (authError) {
+    if (authError.status >= 400 && authError.status < 500) return { access: 'locked' }
+    throw authError
+  }
+  const { data, error } = await supabase
+    .from('user_roles')
+    .select('id, role, is_admin, is_active')
+    .eq('auth_user_id', auth.user.id)
+    .maybeSingle()
+  if (error) throw error
+  if (!data) return { access: 'none' }
+  if (!data.is_active) return { access: 'locked' }
+  return { access: 'ok', ...data }
+}
+
+// The Admin Panel's only data path: the Netlify function, which checks the
+// caller holds Admin before it touches the service role key. There is no
+// browser route to the roster.
+export async function adminAction(action, params = {}) {
+  const { data } = await supabase.auth.getSession()
+  const token = data?.session?.access_token
+  let response
+  try {
+    response = await fetch('/.netlify/functions/admin-actions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token ?? ''}` },
+      body: JSON.stringify({ action, ...params }),
+    })
+  } catch {
+    throw new Error('The admin service could not be reached. Nothing was changed.')
+  }
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(body.error || 'Something went wrong. Nothing was changed.')
+  return body
+}
