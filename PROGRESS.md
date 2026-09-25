@@ -4,161 +4,191 @@
 > anything. Update it at every save point. Replace content — do not append.
 > History lives in git.
 
-**Session:** 1 — build in progress
-**Last updated:** 25 September 2026 — spec revised to v2.0, PROGRESS.md updated by Project Governor
+**Session:** 2 — v2.0 access phase built; half A of the refusal test passed; waiting on half B and deploy
+**Last updated:** 25 September 2026
 **Live URL:** none yet [Rule: fill in after the first successful deploy]
-**Stage:** login and access rules together — the v2.0 access phase (schema, policies, the admin function, the Admin Panel, the Change password screen) is built as one phase and gates on the refusal test below
+**Stage:** login and access rules together — the v2.0 access phase (schema, policies, the admin function, the Admin Panel, the Change password screen) is built as one phase and gates on the refusal test below. Half A passed; half B is open.
 **Supabase project:** created — ref `smnrfopzzzhazkehcqqn`, URL `https://smnrfopzzzhazkehcqqn.supabase.co`
 
 ## Current state
-First Session Setup is done: `docs/` holds product-spec.md (now v2.0 — replace
-the v1.1 copy), the brand skill is installed at
-`.claude/skills/data-leaf-brand/`, and the portal's `questions.js`,
-`ecovadis.js` and `format.js` sit unchanged in `src/lib/`. `.gitignore` and
-`.env.example` are in place; `.env.local` exists locally and is gitignored.
-Add `access-matrix.md` and `user-stories.md` to `docs/` this session — they
-did not exist for v1.1.
+v1.1 is complete (Login, Overview, Risk Flag Board, Register, detail page,
+status lifecycle, superseding trigger). v2.0 is now built on top of it.
 
-**Database (v1.1 scope) is complete.** Six migrations applied via Supabase MCP:
-`submissions.status` (default `new`, check-constrained, indexed) with the
-one-time backfill; the anon insert policy tightened to `status = 'new'` under
-its original name; `submission_status_changes`; the AFTER INSERT superseding
-trigger; `set_submission_status()` granted to `authenticated` only; and
-authenticated select policies on all three tables. No write policy exists for
-`authenticated` anywhere. `resolve_company()` is untouched and still revoked
-from `authenticated`. Verified by direct role tests — see the two "Verified
-behaviour" tables in docs/supabase-setup.md. `user_roles` does not exist yet —
-it is v2.0 scope, below.
+**Two tools, two access models, one database.** The portal (Tool A) went
+live with v3.1 on 25 September 2026: suppliers verify an email by magic link,
+with open signup, so every verified supplier is `authenticated`. The builder
+confirmed the design: magic link for the portal; login plus roles for the
+dashboard. So every dashboard gate now checks for an **active `user_roles`
+row**, never bare `authenticated` and never a JWT claim.
 
-**Frontend (v1.1 scope) is complete and builds clean** (`npm run build`).
-React + Vite + Tailwind on the Data Leaf tokens: Login, the three dashboard
-sections (Overview, Risk Flag Board, Supplier Register) and the supplier
-detail page with status panel, timeline and other-submissions list. Verified
-locally against fixture data with a throwaway preview harness (since removed):
-counts, pie, flag indicators, not-assessable placement and sort, both-route
-duplication, search, the seven single-flag filters, the Save-status enable
-rules, and the superseded lock all behave as specified. The Admin Panel
-(View 4) and the role-based hiding of controls for Procurement do not exist
-yet — they are v2.0 scope, below.
+**Database (v2.0) is complete.** One migration,
+`dashboard_v2_user_roles_and_team_gate` (file in `supabase/migrations/`):
+- `user_roles`: own-row SELECT only, no write policy, no anon grant.
+- The single-Admin rules are held by the database: a partial unique index
+  (at most one Admin), a statement-end constraint trigger (at least one), and
+  a check (Admin must be an active EHS/ESG account). Together these refuse
+  self-deactivation and self-demotion.
+- Isa is seeded as ESG + Admin.
+- The three read policies and `set_submission_status()` moved from the portal
+  session's stopgap JWT flag (`app_metadata.role = 'reviewer'`) to an active
+  `user_roles` row. `set_submission_status()` now refuses unless the caller is
+  active EHS/ESG (`DL403`).
+
+**Admin function is built:** `netlify/functions/admin-actions.js`. Actions:
+list, invite, set_active (ban plus flag), reset_password, set_role, move_admin.
+On every call it checks for a valid session and an active Admin row. It
+refuses self-changes, undoes half-done actions, and returns the fresh roster
+each time. Tested against a stubbed Supabase: non-admin, logged-out and
+self-lockout calls are refused with no writes; the happy paths send the
+expected writes; move_admin is a single upsert.
+
+**Frontend is built and builds clean:**
+- The top bar shows email · role, Change password, and an Admin Panel link
+  for the Admin only.
+- The Admin Panel (View 4) has the roster, invite with a starter password
+  shown once, deactivate/reactivate, reset password, reassign role and Make
+  Admin. A direct visit to `/admin` by a non-admin redirects to the Dashboard.
+- Procurement sees no status control and no comment field. Existing comments
+  stay visible.
+- "Reason" is relabelled "Review comment".
+- The role is re-read on every load and whenever the tab regains focus.
+- A login with no active role row (a supplier, or a deactivated account) is
+  signed out with "This login does not have access to the dashboard."
+- `netlify.toml` sets the build, the functions directory and the SPA fallback.
+- Checked in Chromium with mocked Supabase responses as Procurement and as the
+  Admin; screens behave as specified, with no page errors.
+- The bundle contains no `service_role` string (criterion 34).
+
+`docs/` now holds access-matrix.md and user-stories.md, moved from the root.
 
 ## Last session
-Session 1. Found the Supabase project paused (free-plan idle) and restored it —
-that had taken the live portal down too; nothing was lost. Ran First Session
-Setup, applied all six database migrations, and built the whole v1.1 frontend.
-Corrected two bugs found while testing: the superseding trigger logged a
-hardcoded `new` as `from_status` instead of the row's real previous status, and
-the detail page printed the route twice ("Questionnaire — Questionnaire —
-guided form"). Could not push — see Known issues.
+Session 2. Found that the portal's v3.1 had already gone live on the shared
+database (open magic-link signup, plus a JWT-flag stopgap on the dashboard's
+policies), which the v2.0 spec did not account for. The builder confirmed the
+two-model design. Built the whole v2.0 access phase: `user_roles`, the updated
+function and policies, the Netlify admin function, the Admin Panel, Change
+password, and role-based hiding. Ran and recorded half A.
 
 ## Remaining work
-- [ ] **Builder:** confirm "Allow new users to sign up" is OFF in Supabase →
-      Authentication → Providers → Email (criterion 3). This session could not
-      reach the Supabase API to test it — outbound network is blocked here.
-- [ ] (v2.0 revision) Build `user_roles` via Supabase MCP: fields per
-      docs/product-spec.md §5 (`auth_user_id`, `email`, `role`, `is_admin`,
-      `is_active`), the partial unique index on `is_admin`, and the RLS from
-      docs/access-matrix.md (own-row read only, no direct authenticated
-      writes) — one named migration
-- [ ] (v2.0 revision) Update `set_submission_status()` to add the
-      role ∈ (ehs, esg) and `is_active = true` check
-- [ ] (v2.0 revision) Build the Netlify admin function
-      (`netlify/functions/admin-actions.js`) for invite, deactivate/
-      reactivate, reset password, and reassign role/Admin, using the service
-      role key; it verifies the caller is authenticated and `is_admin` on
-      every call
-- [ ] (v2.0 revision) Build the Admin Panel (View 4): roster table, invite
-      form (starter password shown once), deactivate/reactivate toggle,
-      reset-password button, reassign-role dropdown, move-Admin control;
-      visible only to the current Admin — a direct URL visit by anyone else
-      redirects to the Dashboard
-- [ ] (v2.0 revision) Update the Register and detail views: hide the status
-      control and comment field entirely for Procurement; top bar shows the
-      logged-in user's role next to their email
-- [ ] (v2.0 revision) Build the Change password screen (signed-in user only,
-      Supabase Auth `updateUser()`)
-- [ ] (v2.0 revision) **Builder:** add `SUPABASE_SERVICE_ROLE_KEY` to
-      Netlify's environment variables (copy button, tick "Contains secret
-      values")
-- [ ] (v2.0 revision) **Builder:** confirm whether Isa's v1.1 login already
-      exists in Supabase Auth (spec §15, non-blocking); seed her
-      `user_roles` row (`role = 'esg'`, `is_admin = true`) either way, then
-      invite Isabela and isabel fresh through the new Admin Panel
-      — *(supersedes the earlier "create the team login accounts in
-      Authentication → Users" item: that door is now the Admin Panel)*
+- [ ] **Builder:** add `SUPABASE_SERVICE_ROLE_KEY` to Netlify's environment
+      variables (copy button, tick "Contains secret values"). The function also
+      reads `VITE_SUPABASE_URL`, which is already there.
+- [ ] **Builder:** create the dashboard's own Netlify site from this repo if it
+      doesn't exist yet. Set both `VITE_` variables plus the service role key,
+      then "Deploy project without cache".
+- [ ] **Builder:** log in as Isa and invite isabela@gmail.com (EHS) and
+      isabel@gmail.com (Procurement) from the Admin Panel. Hand each starter
+      password over directly.
+- [ ] (v2.0) GATE, half B — do not treat this phase as live until it passes.
+      Isabela, Isa and isabel each log in on the deployed screens and walk
+      criteria 23–34. Every `no` is refused, every `own` returns only their own
+      row, a deactivated account is locked out, and Procurement sees no
+      controls. Record the results below.
 - [ ] Log in against the live database and walk every v1.1 view (criteria 1,
-      2, 6, 11, 12, 20 end-to-end; the logic behind them is already verified)
-- [ ] Criterion 18: make a real submission from the live portal
-      (https://the-corporate-sep.netlify.app) and confirm it still reaches its
-      confirmation screen and lands with `status = 'new'`
-- [ ] (v2.0 revision) GATE, half A (Claude Code): try every `no` cell and the
-      `own` boundary on `user_roles · read`, through the API, as each named
-      person and logged out — paste results into Refusal test record below
-- [ ] (v2.0 revision) GATE, half B (the named people) — do not deploy this
-      phase until it passes: Isabela, Isa and isabel each log in on the
-      screens; every `no` in docs/access-matrix.md is refused, every `own`
-      returns only their rows, a deactivated account is fully locked out,
-      and Procurement sees no controls anywhere
-- [ ] Acceptance criteria pass — verify criteria 23–34 (and re-confirm 1–22
-      still hold) before deploy
-- [ ] Deploy to Netlify: builder creates the dashboard's own site from this
-      repo, adds both `VITE_` variables and `SUPABASE_SERVICE_ROLE_KEY`
-      ("Contains secret values" unticked for the `VITE_` pair, ticked for the
-      service role key), then runs "Deploy project without cache"
-- [ ] Builder: copy docs/supabase-setup.md back into the portal repo's docs/
+      2, 6, 11, 12, 20 end to end — the logic is already verified)
+- [ ] Criterion 18 (re-worded for portal v3.1): make a real submission from
+      the live portal and confirm it lands with `status = 'new'` and shows in
+      the dashboard
+- [ ] **Builder:** decide what to do with the two logins that are not on the
+      team: `cohortfriends@gmail.com` (created 18 Sep, never signed in) and
+      `piff@gmail.com` (24 Sep). Neither has a `user_roles` row, so neither
+      can see anything in the dashboard. Leave them, or remove them in
+      Authentication → Users.
+- [ ] **Builder:** re-run the Project Governor on spec v2.0 plus portal v3.1.
+      CLAUDE.md's Supabase section still says "Allow new users to sign up
+      stays OFF", "authenticated may select all rows (unchanged)", "anon may
+      insert … (unchanged)" and that `resolve_company()` "stays revoked from
+      authenticated". None of those is true since portal v3.1. The built rules
+      are in docs/supabase-setup.md.
+- [ ] Builder: copy docs/supabase-setup.md back into the portal repo's docs/.
+      The portal's copy has not seen `user_roles` or the new read policies.
 [Rule: completed items leave this list and are absorbed into Current state. This list only shrinks.]
 
 ## Refusal test record
-None yet. [Rule: filled by Claude Code at half A and by the builder at half B:
-date, who, cell tried, result. Kept, never cleared; the handover package
-copies it. Any later change to a rule re-runs both halves before the push.]
+**Half A — Claude Code, 25 September 2026, via Supabase MCP** (`set local
+role` plus `request.jwt.claims`, one transaction, rolled back). Full table in
+docs/supabase-setup.md → RLS → Refusal test — half A. Summary:
+- anon: every table read refused or 0 rows; `set_submission_status()`
+  refused (permission denied).
+- Verified supplier (authenticated, no role row): 0 rows from all four tables;
+  `set_submission_status()` refused `DL403`; self-insert into `user_roles`
+  refused.
+- Procurement: reads everything; `user_roles` own row only (Isa's row: 0);
+  `set_submission_status()` refused `DL403` for accepted and for
+  needs_review; direct writes to `user_roles`, `submissions` and the status
+  log refused or 0 rows.
+- Isa (ESG, Admin): own `user_roles` row only; a direct self-update is
+  refused; status function passes the role check.
+- Deactivated, old session still open: 0 rows. Reassigned Procurement →
+  EHS: the next status call is allowed, with no re-login.
+- Admin invariants (service-role path): no Admin, a second Admin, an Admin
+  who is deactivated or Procurement, and deleting the Admin's row are all
+  refused. Moving Admin in one statement succeeds.
+- Admin function (stubbed Supabase): GET 405; no or invalid token 401; a
+  non-admin or no-row caller gets 403 for list, invite and self-promote with
+  no writes; the Admin changing their own active flag or role gets 403;
+  moving Admin to Procurement gets 409.
+
+**Half B — open.** [Rule: filled by the builder: date, who, cell tried,
+result. Kept, never cleared; the handover package copies it. Any later
+change to a rule re-runs both halves before the push.]
 
 ## Build decisions
 - Door display labels confirmed pre-build (see CLAUDE.md Business Rules).
 - shadcn/ui is followed as a pattern, not installed: `src/components/ui.jsx`
-  holds hand-written composable primitives on the Data Leaf tokens. The CLI
-  scaffold ships Tailwind gray/blue defaults the brand forbids.
-- Tailwind's stock palette is **replaced** in `tailwind.config.js`, not
-  extended, so `bg-white` / `text-gray-500` / `bg-blue-600` fail the build
-  rather than shipping off-brand. Preflight's gray-400 placeholder and
-  blue-500 ring default are overridden in `src/index.css`.
-- `set_submission_status()` raises custom SQLSTATEs (`DL401`, `DL409`,
-  `DL422`) so the UI can tell the "superseded and locked" refusal from a
-  general failure — the spec words those two messages differently. Matching on
-  message text would have been brittle.
-- The superseding trigger swallows unexpected errors into a `WARNING`. It runs
-  inside the portal's insert, and a raise would show suppliers a false save
-  failure (spec §5 rule 3).
-- The pie chart is hand-drawn SVG arcs — two slices did not justify a chart
-  dependency. A single 100% slice is drawn as a circle, since an arc whose
-  start and end coincide renders nothing.
-- (v2.0 revision) Team account creation moves from direct entry in Supabase
-  Authentication → Users to the in-app Admin Panel's invite flow. The earlier
-  "create the team login accounts" task is superseded, not duplicated.
+  holds hand-written primitives on the Data Leaf tokens.
+- Tailwind's stock palette is **replaced**, not extended, so off-brand
+  classes fail the build.
+- `set_submission_status()` raises custom SQLSTATEs (`DL401`, `DL403`,
+  `DL409`, `DL422`) so the UI can tell the refusals apart.
+- The superseding trigger swallows unexpected errors into a `WARNING`, so the
+  portal never shows a false save failure.
+- The pie chart is hand-drawn SVG arcs.
+- (v2.0) Team accounts are created from the in-app Admin Panel, not
+  Authentication → Users.
+- (v2.0) Dashboard access is an active `user_roles` row, not `authenticated`
+  and not a JWT claim. Builder's direction, because portal v3.1 made every
+  supplier `authenticated`. It is also a live read, so criteria 26 and 30 hold
+  without re-login. It replaces the portal session's `app_metadata.role`
+  stopgap.
+- (v2.0) Single-Admin rule: partial unique index (spec default) plus a
+  deferrable constraint trigger for "at least one", checked at statement end.
+  So moving Admin is one upsert statement, and no Postgres admin function was
+  needed (CLAUDE.md forbids one).
+- (v2.0) Deactivate = Auth ban plus `is_active = false`. The ban stops
+  refreshes and logins; the flag is what RLS and the status function read, so
+  an open session gets nothing on its very next request. The app also calls
+  `getUser()` on load and signs out a banned or role-less login.
+- (v2.0) Nobody changes their own row through the function, Admin included.
+  The Admin's only self-change is Make Admin on someone else. The Admin
+  cannot reset their own password there either; they use Change password.
+- (v2.0) Invite refuses an email that already has a login (for example a
+  supplier who verified on the portal) rather than turning that login into a
+  team account. A half-made invite is rolled back by deleting the new login.
+- (v2.0) Starter passwords are 16 characters from an alphabet without
+  look-alike characters, generated server-side with `crypto.randomInt`.
+- (v2.0) Change password asks for at least 8 characters, stricter than
+  Supabase's default of 6.
+- (v2.0) Routes are real paths (`/admin`, `/password`) with a Netlify SPA
+  fallback. Section anchors stay as `#overview` etc.
 
 ## Known issues
-- **Cannot push to GitHub from this session.** `git push` returns 403: the
-  Claude GitHub App is not installed for `isadorapined/supplier-dashboard`.
-  Two commits are sitting on the local branch `claude/blissful-darwin-vnivmn`.
-  Fix at https://github.com/apps/claude/installations/select_target or by
-  reconnecting GitHub in claude.ai settings, then push.
-- Commits are on `claude/blissful-darwin-vnivmn`, not `main` as CLAUDE.md's
-  save-point rule says — this session was pinned to that branch. Merge it to
-  main once the push works.
-- Outbound network to `*.supabase.co` is blocked in this environment, so the
-  app could not be run against the live database here, and criteria 3 and 18
-  are untested. Everything reachable through Supabase MCP was tested directly.
-- Builder decision still open: delete the `isa` test company and its two
-  submissions? They now show in the dashboard (one current, one superseded).
-  Deleting is a Supabase dashboard task — the tool cannot delete.
+- **Pushes go to `claude/hopeful-darwin-r0tlof`, not `main`.** This session
+  was pinned to that branch. Merge it to main (PR) to deploy.
+- Outbound network to `*.supabase.co` is blocked in Claude Code's cloud
+  environment, so the app could not be run against the live database here.
+  The database was tested directly through Supabase MCP. The UI was tested
+  with mocked responses, and the admin function with a stubbed Supabase.
+- The admin function has not run against real Supabase yet: it needs the
+  service role key in Netlify. Half B is its first real run.
 - Free plan: the project pauses after about a week idle and takes both tools
-  down. It was found paused at the start of this session and restored.
-- The portal repo's CLAUDE.md and docs/supabase-setup.md are now stale.
+  down.
+- CLAUDE.md is stale on the points listed under Remaining work (Governor
+  re-run). The portal repo's copy of docs/supabase-setup.md is stale too.
 - `answers` is schemaless and keyed by questions.js ids. Historical rows keep
   old keys if ids ever change.
-- Spec revised to v2.0 on 25 September 2026 — CLAUDE.md regenerated by
-  Project Governor. Access model changed A2 → A3: added EHS/ESG/Procurement
-  roles and an Admin capability (`user_roles` table, a new Netlify admin
-  function, and the Admin Panel). None of it is built yet — see Remaining work.
+- Supabase Auth "leaked password protection" is off (advisor WARN). It's
+  optional; switching it on in Auth settings would harden Change password.
 
 ## Notes for next session
 None.

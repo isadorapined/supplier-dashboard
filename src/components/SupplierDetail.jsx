@@ -36,7 +36,7 @@ function Identity({ company, submission }) {
   )
 }
 
-function StatusPanel({ submission, supersededBy, onSaved }) {
+function StatusPanel({ submission, supersededBy, canReview, onSaved }) {
   const [choice, setChoice] = useState('')
   const [reason, setReason] = useState('')
   const [error, setError] = useState('')
@@ -62,6 +62,11 @@ function StatusPanel({ submission, supersededBy, onSaved }) {
     )
   }
 
+  // Procurement (or any login that is not an active EHS/ESG account) gets no
+  // control at all — not a disabled one. set_submission_status() refuses the
+  // same call independently if it is made from the console.
+  if (!canReview) return null
+
   const reasonRequired = choice === 'needs_review'
   // Disabled until a *different* status is chosen and, for Needs review, a
   // non-blank reason is entered.
@@ -83,6 +88,11 @@ function StatusPanel({ submission, supersededBy, onSaved }) {
       // supplier resubmitted while this page was open.
       if (err?.code === 'DL409') {
         setError('This submission has been superseded and is locked.')
+        await onSaved()
+      } else if (err?.code === 'DL403') {
+        // The Admin changed this login's role since the page loaded. Refresh,
+        // which re-reads the role and removes the controls.
+        setError('Status not saved. Nothing was changed. Try again.')
         await onSaved()
       } else {
         setError('Status not saved. Nothing was changed. Try again.')
@@ -120,7 +130,7 @@ function StatusPanel({ submission, supersededBy, onSaved }) {
 
       <label className="mb-3 block">
         <span className="mb-1 block text-sm font-medium text-deep">
-          Reason{' '}
+          Review comment{' '}
           {reasonRequired ? (
             <span className="text-clay">— required for Needs review</span>
           ) : (
@@ -189,7 +199,15 @@ function OtherSubmissions({ others, onOpen }) {
   )
 }
 
-export default function SupplierDetail({ submission, company, others, onBack, onOpen, onRefresh }) {
+export default function SupplierDetail({
+  submission,
+  company,
+  others,
+  onBack,
+  onOpen,
+  onRefresh,
+  canReview,
+}) {
   const [history, setHistory] = useState([])
   const [historyError, setHistoryError] = useState('')
 
@@ -239,7 +257,12 @@ export default function SupplierDetail({ submission, company, others, onBack, on
         <SubmissionContent submission={submission} />
       </div>
 
-      <StatusPanel submission={submission} supersededBy={supersededBy} onSaved={handleSaved} />
+      <StatusPanel
+        submission={submission}
+        supersededBy={supersededBy}
+        canReview={canReview}
+        onSaved={handleSaved}
+      />
 
       <ErrorMessage>{historyError}</ErrorMessage>
       <Timeline submission={submission} history={history} />

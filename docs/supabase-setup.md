@@ -4,13 +4,16 @@
 > schema in CLAUDE.md from the moment it exists. Update it at every save point
 > that touches the database — a table, a column, a policy, or a function.
 
-**Last updated:** 18 September 2026 — dashboard session 1
+**Last updated:** 25 September 2026 — dashboard session 2 (v2.0 access phase)
 
-> **Two tools, one database.** This project is shared by
-> **Tool A — The Corporate Supplier Sustainability Portal 2026** (public,
-> no login, created this schema) and **Tool B — The Corporate Supplier Review
-> Dashboard 2026** (internal, login-protected, reads both tables and owns the
-> review status). Both repos carry a copy of this file. The dashboard's copy
+> **Two tools, one database, two access models.** This project is shared by
+> **Tool A — The Corporate Supplier Sustainability Portal 2026** (public;
+> since v3.1 a supplier verifies an email by **magic link** before
+> submitting — open signup) and **Tool B — The Corporate Supplier Review
+> Dashboard 2026** (internal; email-and-password login **plus roles** from
+> `user_roles`, v2.0). Because every verified supplier is `authenticated`,
+> **`authenticated` is not the dashboard team.** Every dashboard gate checks
+> for an active `user_roles` row, which suppliers never have. Both repos carry a copy of this file. The dashboard's copy
 > is now the newer one: **copy it back into the portal repo's `docs/`** so the
 > portal's next session does not work from a stale schema.
 
@@ -95,6 +98,8 @@ for the anon key.
 | `declaration_date` | `date` | yes | — | Path B only |
 | `submitted_at` | `timestamptz` | no | `now()` | |
 | `status` | `text` | no | `'new'` | **Added by the dashboard.** Check: `new` \| `accepted` \| `needs_review` \| `superseded` |
+| `verified_user_id` | `uuid` | yes | `auth.uid()` | **Added by the portal (v3.1).** FK → `auth.users.id`. The verifying supplier's session; null only on rows written before v3.1 |
+| `contact_email` | `text` | yes | `auth.email()` | **Added by the portal (v3.1).** The verified email; checked by the portal's insert policy |
 
 **Indexes**
 
@@ -135,102 +140,121 @@ only by `supersede_previous_submissions()` and `set_submission_status()`.
 - `submission_status_changes_pkey` — primary key on `id`
 - `submission_status_changes_submission_id_idx` — on `(submission_id, changed_at desc)`
 
+### `user_roles`
+
+*Added by the dashboard (v2.0).* The dashboard team: one row per login.
+**Never deleted** — deactivated instead. Written only by the Netlify admin
+function (`netlify/functions/admin-actions.js`) with the service role key;
+no browser session can write it.
+
+| Column | Type | Null | Default | Notes |
+|--------|------|------|---------|-------|
+| `id` | `uuid` | no | `gen_random_uuid()` | Primary key |
+| `auth_user_id` | `uuid` | no | — | **Unique**, FK → `auth.users.id`. Set by the function at invite time |
+| `email` | `text` | no | — | For the Admin Panel roster |
+| `role` | `text` | no | — | Check: `ehs` \| `esg` \| `procurement` |
+| `is_admin` | `boolean` | no | `false` | Exactly one `true` row at all times |
+| `is_active` | `boolean` | no | `true` | `false` = deactivated (and the Auth login is banned) |
+| `created_at` | `timestamptz` | no | `now()` | Shown as "Invited on" |
+| `updated_at` | `timestamptz` | no | `now()` | Set by `user_roles_touch_updated_at` on every update |
+
+**Constraints — the Admin rules, held by the database, not the UI**
+
+| Object | What it refuses |
+|--------|-----------------|
+| `user_roles_one_admin` — partial unique index on `(is_admin) where is_admin` | a second Admin |
+| `user_roles_require_one_admin` — constraint trigger, `deferrable initially immediate` (checked at the end of each statement) | zero Admins: removing Admin without granting it to someone in the **same statement**, or deleting the Admin's row |
+| `user_roles_admin_is_active_reviewer` — check `not is_admin or (is_active and role in ('ehs','esg'))` | Admin on a Procurement or inactive account — which is also what refuses the Admin deactivating or demoting themselves |
+
+Moving Admin is therefore **one statement**: the function upserts the current
+holder (`is_admin = false`, sent first) and the successor (`is_admin = true`)
+together. Both trigger functions have execute revoked from `public`, `anon`
+and `authenticated`.
+
 ---
 
 ## RLS
 
-**RLS is enabled on both tables and must never be disabled.** If a query fails,
+**RLS is enabled on every table and must never be disabled.** If a query fails,
 fix the policy or the query.
 
-> **The spec was wrong about this and was corrected during the build.** v3.0 §6
-> originally read "no RLS policies in this version," §14 repeated it, and §2's
-> Tier table implied RLS arrives with auth at Tier 3. All three have been
-> corrected in `docs/product-spec.md`. RLS is not an authentication feature. The
-> anon key ships inside the public JavaScript bundle and the portal URL is
-> handed to every Tier 1 supplier, so without RLS any recipient could read,
-> alter, or delete every other supplier's submission. RLS is required on any
-> table the anon key can reach, at every tier, login or no login.
+> RLS is not an authentication feature. The anon key ships inside both tools'
+> public JavaScript bundles, and since portal v3.1 anyone can become
+> `authenticated` by verifying an email. RLS is what makes both of those safe.
 
-| Table | Policy | Role | Command |
-|-------|--------|------|---------|
-| `companies` | *(no anon policy — deliberately)* | `anon` | — |
-| `companies` | `authenticated may read companies` | `authenticated` | `SELECT` using `true` |
-| `submissions` | `anon may insert a submission` | `anon` | `INSERT` with check **`status = 'new'`** |
-| `submissions` | `authenticated may read submissions` | `authenticated` | `SELECT` using `true` |
-| `submission_status_changes` | `authenticated may read the status log` | `authenticated` | `SELECT` using `true` |
+| Table | Policy | Role | Command | Owner |
+|-------|--------|------|---------|-------|
+| `companies` | `team member may read companies` | `authenticated` | `SELECT` using *active `user_roles` row for `auth.uid()`* | dashboard |
+| `submissions` | `verified supplier may insert own submission` | `authenticated` | `INSERT` with check `contact_email = auth.email() and verified_user_id = auth.uid() and status = 'new'` | portal (v3.1) |
+| `submissions` | `team member may read submissions` | `authenticated` | `SELECT` using *active `user_roles` row* | dashboard |
+| `submission_status_changes` | `team member may read the status log` | `authenticated` | `SELECT` using *active `user_roles` row* | dashboard |
+| `user_roles` | `team member may read own role` | `authenticated` | `SELECT` using `auth_user_id = auth.uid()` | dashboard |
 
-`companies` still has **no anon policy at all**, which denies every anon
-select, insert, update and delete. Supplier contact details remain unreadable
-from an anon browser session. The only anon route in is `resolve_company()`.
+"Active `user_roles` row" is
+`exists (select 1 from user_roles r where r.auth_user_id = (select auth.uid()) and r.is_active)`.
+Every role — EHS, ESG, Procurement — reads the same rows (access matrix §4:
+no column exceptions). A verified supplier has no row, so reads nothing. A
+deactivated team member's still-open session reads nothing on its next request.
 
-### Why an `authenticated` select policy on `companies` is not a breach of the portal's rule
+**Table grants.** `anon` has no grant on `companies`, `submissions` (revoked
+by the portal's `v31_close_anon_write_path`) or `user_roles`. `authenticated`
+has `SELECT` only on `user_roles`. There is **no anon policy on any table** —
+the portal's anon insert policy was dropped at its v3.1 cutover.
 
-The portal's note below says *"never add a select policy to `companies`."*
-That rule exists to keep supplier contact details away from the **anon** key,
-which ships inside both tools' public JavaScript bundles and is handed to every
-supplier with the portal URL. The policy added here grants `SELECT` to the
-**`authenticated`** role only. It adds nothing for `anon`, and anon still reads
-zero rows from `companies` — verified below.
+**No write policy exists for any team role on any table.** Status changes go
+only through `set_submission_status()`; the log is written only by that
+function and the superseding trigger; `user_roles` only by the admin function.
+Never add an `UPDATE` policy to `submissions`, and never a write policy to
+`user_roles`.
 
-That is safe only because **signup is disabled at the Supabase Auth level**.
-With signup off, `authenticated` means "a user the builder created by hand in
-Authentication → Users", which is exactly the small invited team the dashboard
-exists for. If signup were ever switched on, anyone holding the public anon key
-could create an account and read every supplier's contact details through this
-policy. **Signup staying off is what holds this rule up.**
+> **Superseded (history):** v1.1 read policies were `authenticated … using
+> (true)`, which held only while signup was off. Portal v3.1 turned signup on,
+> and its `v31_scope_dashboard_access_to_reviewers` migration narrowed them to
+> a JWT flag (`app_metadata.role = 'reviewer'`) as a stopgap. Dashboard v2.0
+> replaced that flag with the `user_roles` check above. `app_metadata.role`
+> is no longer read by anything; Isa's account still carries it, harmlessly.
 
-`resolve_company()` remains revoked from `authenticated`, as before — the
-portal's old note about granting it when auth arrives is overridden by
-dashboard spec v1.1.
+### Refusal test — half A (25 September 2026, dashboard session 2)
 
-**No write policy exists on any table for `authenticated`.** Status changes go
-only through `set_submission_status()`, and the log is written only by that
-function and the superseding trigger. Never add an `UPDATE` policy to
-`submissions`.
+Run through Supabase MCP as each caller (`set local role` plus
+`request.jwt.claims`), inside a transaction that was rolled back. A stand-in
+Procurement row was attached to an existing test login for the run and did
+not persist.
 
-Supabase's linter reports this as `rls_enabled_no_policy` (INFO) — that finding
-is expected and intentional here, not a gap to close.
-
-Because `submissions` is insert-only, the client cannot read back the row it
-just wrote: a `.insert().select()` chain is refused by the policy. The
-confirmation screen (View 7) is rendered from in-browser state instead. Do not
-"fix" this by adding a select policy.
-
-### Verified behaviour, as the `anon` role
-
-| Attempt | Result |
-|---------|--------|
-| `select` from `companies` | 0 rows, even with rows present |
-| `insert` into `companies` directly | refused — `new row violates row-level security policy` |
-| `delete` from `companies` | 0 rows affected |
-| `insert` into `submissions` (no `status` sent) | succeeds — arrives as `new` |
-| `insert` into `submissions` with `status = 'accepted'` | refused — `new row violates row-level security policy` |
-| `insert` into `submissions` with `status = 'superseded'` | refused — same |
-| `select` from `submissions` | 0 rows |
-| `update` / `delete` on `submissions` | 0 rows affected |
-| `select` from `submission_status_changes` | 0 rows |
-| `select public.set_submission_status(...)` | refused — `permission denied for function` |
-
-### Verified behaviour, as the `authenticated` role
-
-| Attempt | Result |
-|---------|--------|
-| `select` from `companies` / `submissions` / `submission_status_changes` | all rows |
-| `update public.submissions set status = ...` | 0 rows affected (no update policy) |
-| `delete from public.submissions` | 0 rows affected |
-| `insert` into `submission_status_changes` | refused — RLS |
-| `insert` / `update` on `companies` | refused / 0 rows affected |
-| `delete from submission_status_changes` | 0 rows affected |
-
----
+| Caller | Attempt | Result |
+|--------|---------|--------|
+| anon | read `companies` / `submissions` / `user_roles` | refused — `permission denied` |
+| anon | read `submission_status_changes` | 0 rows |
+| anon | `set_submission_status()` | refused — `permission denied for function` |
+| verified supplier (authenticated, no role row) | read all four tables | 0 rows each |
+| verified supplier | `set_submission_status()` | refused — `DL403` |
+| verified supplier | insert own `user_roles` row | refused — `permission denied` |
+| Procurement | read companies / submissions / status log | all rows (3 / 4 / 4) |
+| Procurement | read `user_roles` | own row only (1); Isa's row: 0 |
+| Procurement | `set_submission_status()` → accepted / needs_review | refused — `DL403`, both |
+| Procurement | update own role / delete `user_roles` | refused — `permission denied` |
+| Procurement | direct update / delete on `submissions` | 0 rows affected |
+| Procurement | insert into status log | refused — RLS |
+| Isa (ESG, Admin) | read `user_roles` | own row only (1); other row: 0 |
+| Isa | direct update of her own `user_roles` row | refused — `permission denied` |
+| Isa | `set_submission_status()` | reaches the v1.1 checks (`DL422` no-op on that row) — role check passed |
+| deactivated Procurement, old session | read submissions / companies | 0 rows |
+| Procurement reassigned to EHS, same session | `set_submission_status()` | **allowed** on the next call |
+| service role (the function's path) | remove Admin with no successor | refused — `Exactly one Admin is required` |
+| service role | deactivate Admin / make Admin Procurement | refused — check `user_roles_admin_is_active_reviewer` |
+| service role | grant a second Admin | refused — `user_roles_one_admin` |
+| service role | delete the Admin's row | refused — `Exactly one Admin is required` |
+| service role | move Admin in one statement | succeeds |
 
 ## Functions
 
 ### `public.resolve_company(p_legal_name, p_registered_country, p_contact_name, p_contact_title, p_contact_email) → uuid`
 
-`SECURITY DEFINER`, `set search_path = public, pg_temp`. Execute granted to
-`anon` only — explicitly revoked from `public` and from `authenticated`, since
-this build has no authenticated users.
+`SECURITY DEFINER`, `set search_path = public, pg_temp`. **Owned by the
+portal.** Since portal v3.1, execute is granted to `authenticated` only (a
+verified supplier) and revoked from `anon` and `public`. The dashboard never
+calls it. A dashboard team member could technically call it too — it only
+matches or inserts a company and returns an id, so it reveals nothing.
 
 Implements spec §5's matching rule server-side:
 
@@ -245,8 +269,9 @@ Implements spec §5's matching rule server-side:
 Implemented as a single `INSERT … ON CONFLICT … DO UPDATE`, which is what makes
 it atomic against concurrent submissions.
 
-The Supabase linter reports `anon_security_definer_function_executable` (WARN)
-for this function. That is intentional — anon calling it is the entire design.
+The Supabase linter may report `authenticated_security_definer_function_executable`
+for this function. That is intentional — verified suppliers calling it is the
+portal's design.
 
 ### `public.supersede_previous_submissions()` — AFTER INSERT trigger on `submissions`
 
@@ -274,14 +299,16 @@ time.
 
 ### `public.set_submission_status(p_submission_id uuid, p_new_status text, p_reason text) → void`
 
-*Added by the dashboard.* `SECURITY DEFINER`, `set search_path = public, pg_temp`.
-Execute granted to **`authenticated` only**, revoked from `public` and `anon`.
+*Added by the dashboard; role check updated in v2.0.* `SECURITY DEFINER`,
+`set search_path = public, pg_temp`. Execute granted to **`authenticated`
+only**, revoked from `public` and `anon`.
 
 The **only** way a status changes by hand. It refuses when:
 
 | Condition | SQLSTATE | Message |
 |-----------|----------|---------|
 | `auth.uid()` is null | `DL401` | `Not signed in.` |
+| caller has no `user_roles` row with `role in ('ehs','esg')` and `is_active` — Procurement, deactivated accounts, suppliers | `DL403` | `Only active EHS or ESG accounts can change a submission's status.` |
 | target is not `accepted` or `needs_review` | `DL422` | `Status <x> cannot be set by hand.` |
 | submission does not exist | `DL422` | `Submission not found.` |
 | the row is `superseded` | `DL409` | `This submission has been superseded and is locked.` |
@@ -316,6 +343,10 @@ function as it does for `resolve_company`. Expected — it is granted to
 | `dashboard_v1_superseding_trigger_real_from_status` | Logs each row's actual previous status instead of a hardcoded `new` |
 | `dashboard_v1_set_submission_status` | `set_submission_status()`, granted to `authenticated` only |
 | `dashboard_v1_authenticated_read_policies` | Authenticated select policies on `companies` and `submissions` |
+| `v31_verified_supplier_insert_path` | *Portal v3.1.* `submissions.verified_user_id` + `contact_email`; the verified-supplier insert policy; `resolve_company` granted to `authenticated` |
+| `v31_scope_dashboard_access_to_reviewers` | *Portal v3.1.* Stopgap: dashboard reads and `set_submission_status()` gated on JWT `app_metadata.role = 'reviewer'` |
+| `v31_close_anon_write_path` | *Portal v3.1 cutover.* Dropped the anon insert policy; revoked `resolve_company` and both tables from `anon` |
+| `dashboard_v2_user_roles_and_team_gate` | *Dashboard v2.0.* `user_roles` + its Admin constraints, RLS and grants; Isa seeded as ESG + Admin; the three read policies and `set_submission_status()` moved from the JWT flag to an active `user_roles` row. File: `supabase/migrations/20260925_dashboard_v2_user_roles_and_team_gate.sql` |
 
 ### One-time backfill (ran inside `dashboard_v1_status_column_backfill_and_insert_policy`)
 
@@ -338,17 +369,34 @@ now on the trigger keeps the invariant.
 
 ## Auth
 
-| Detail | Value |
-|--------|-------|
-| Method | Email and password |
-| Signup | **Invite-only.** "Allow new users to sign up" must be **OFF** in Authentication → Providers → Email |
-| Users | Created by the builder in Authentication → Users → Add user |
-| In-app password reset | None — out of scope. The builder resets passwords in the Supabase dashboard |
+One Supabase Auth, two ways in:
 
-> **Signup being off is a security control, not a preference.** The anon key is
-> public. With signup on, anyone holding it could create an account, become
-> `authenticated`, and read every supplier's contact details and submissions
-> through the policies above. Confirm it is off before every deploy.
+| | Portal (Tool A, v3.1) | Dashboard (Tool B, v2.0) |
+|---|---|---|
+| Method | Magic link (passwordless) | Email and password |
+| Who gets an account | Anyone who verifies an email — **"Enable sign-ups" is ON** | Only people the Admin invites from the Admin Panel |
+| What the account can do | Insert its own submission | Whatever its `user_roles` row allows |
+
+Signup being ON is the portal's design and is **no longer a dashboard
+security control**: the dashboard's gate is the `user_roles` row, which only
+the admin function can create. A login without one — every supplier — is
+signed straight back out by the dashboard and reads nothing through RLS.
+
+**Dashboard account management (v2.0)** happens in the in-app Admin Panel,
+through `netlify/functions/admin-actions.js` with the service role key — not
+in Authentication → Users:
+
+| Action | Auth Admin API | `user_roles` |
+|--------|----------------|--------------|
+| Invite | `createUser` (email confirmed, generated starter password) | insert row (`is_active = true`); if the insert fails the new login is deleted again |
+| Deactivate | ban (`ban_duration` ≈ 100 years) | `is_active = false`; if that fails the ban is lifted again |
+| Reactivate | unban (`ban_duration: 'none'`) | `is_active = true` |
+| Reset password | `updateUserById` with a new generated password | — |
+| Reassign role | — | `role` |
+| Move Admin | — | one upsert of both rows |
+
+The starter password is returned once to the Admin's screen, never logged or
+emailed. Signed-in users change their own password with `updateUser()`.
 
 The dashboard's Supabase client sets `persistSession: true` and
 `autoRefreshToken: true`. The portal's client sets `persistSession: false` —
@@ -359,18 +407,18 @@ do not copy one into the other.
 ## Environment variables
 
 Set in the **Netlify dashboard** (Site configuration → Environment variables)
-before the first deploy, and in `.env.local` for local development. Vite inlines
-them into the client bundle at build time.
+before the first deploy, and in `.env.local` for local development (the
+`VITE_` pair only).
 
-| Variable | Where to get it |
-|----------|-----------------|
-| `VITE_SUPABASE_URL` | Project Settings → API → Project URL |
-| `VITE_SUPABASE_ANON_KEY` | Project Settings → API → anon / publishable key |
+| Variable | Where to get it | Read by |
+|----------|-----------------|---------|
+| `VITE_SUPABASE_URL` | Project Settings → API → Project URL | browser (inlined at build) and the admin function |
+| `VITE_SUPABASE_ANON_KEY` | Project Settings → API → anon / publishable key | browser |
+| `SUPABASE_SERVICE_ROLE_KEY` | Project Settings → API → service role key (copy button) | **the admin function only** — tick "Contains secret values" |
 
-The anon key is **public by design** — it ships inside the JavaScript bundle
-and anyone can read it. It is safe only because RLS is on. The service role key
-is not used by this build and must never appear in a `VITE_` variable, in any
-committed file, or anywhere in the frontend.
+The anon key is **public by design**; RLS makes it safe. The service role key
+bypasses RLS: it must never be `VITE_`-prefixed, committed, or referenced from
+`src/`. Checked at build: the bundle contains no `service_role` string.
 
 `.env` and `.env.*` are gitignored (`.env.example` excepted).
 
@@ -407,14 +455,17 @@ order by s.submitted_at desc;
 ## Notes for future sessions
 
 - **Never disable RLS** to unblock a query. Fix the policy or the query.
-- **Never add an `anon` select policy to `companies`.** The `authenticated`
-  select policy added for the dashboard is the one deliberate exception, and it
-  holds only while signup is off — see the RLS section above. If something else
+- **Never add an `anon` select policy to `companies`.** The only read path is
+  the dashboard's team-member policy. If something else
   needs company data, add a `SECURITY DEFINER` function that returns only what
   it needs.
-- `resolve_company` stays **revoked from `authenticated`**. The portal's old
-  note about granting it when auth arrives is overridden by dashboard spec
-  v1.1 — the dashboard never resolves companies, it only reads them.
+- **`authenticated` is not the team.** Any new dashboard policy or function
+  gate must check for an active `user_roles` row, never `authenticated` alone
+  and never a JWT claim — a supplier who verified an email is `authenticated`.
+- `resolve_company` is granted to `authenticated` by the portal (v3.1) so
+  verified suppliers can submit. The dashboard never calls it.
+- `user_roles` has no write policy by design. Every write goes through the
+  admin function, which checks the caller is the active Admin first.
 - **Never add an `UPDATE` policy to `submissions`.** `set_submission_status()`
   is the only by-hand write path, by design.
 - **Never disable the superseding trigger** to fix a data problem. It runs
@@ -422,11 +473,13 @@ order by s.submitted_at desc;
 - `answers` is schemaless by design. Question ids come from
   `src/lib/questions.js`; if those ids ever change, historical rows keep the old
   keys. Prefer adding ids over renaming them.
-- Linter findings that are intentional: `anon_security_definer_function_executable`
-  on `resolve_company` and on `set_submission_status`. The old
-  `rls_enabled_no_policy` finding on `companies` has gone now that the
-  authenticated select policy exists. Do not "resolve" the remaining two
-  without re-reading this file.
+- Linter findings that are intentional (checked 25 September 2026):
+  `authenticated_security_definer_function_executable` on `resolve_company`
+  (verified suppliers call it) and on `set_submission_status` (team members
+  call it; it checks `user_roles` itself). Do not "resolve" either without
+  re-reading this file. `auth_leaked_password_protection` (WARN) is a
+  one-click Auth setting the builder may switch on — it would make the
+  dashboard refuse known-breached passwords at Change password.
 - **Free plan pause.** The project pauses after roughly a week idle and takes
   **both** tools down — the portal refuses submissions and dashboard login
   fails. It was found paused at the start of dashboard session 1 and restored

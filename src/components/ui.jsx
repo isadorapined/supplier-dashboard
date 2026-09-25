@@ -2,9 +2,11 @@
 // classes) but hand-written against the Data Leaf tokens, so no component
 // carries a default white, gray or blue.
 
-export function Panel({ children, className = '', as: Tag = 'section' }) {
+export function Panel({ children, className = '', as: Tag = 'section', ...props }) {
   return (
-    <Tag className={`rounded-md border border-deep-12 bg-silver ${className}`}>{children}</Tag>
+    <Tag className={`rounded-md border border-deep-12 bg-silver ${className}`} {...props}>
+      {children}
+    </Tag>
   )
 }
 
