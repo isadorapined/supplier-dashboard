@@ -1,200 +1,151 @@
-# Access Matrix — The Corporate Supplier Sustainability Portal 2026
+# Access Matrix — The Corporate Supplier Review Dashboard 2026
 
-**Written against:** product-spec.md v3.1 · supabase-setup.md as of 11 September 2026
-**Population pattern:** Open self-verification (single role, no named list). Reconstructed short-run pattern was **P1 — public, stays anonymous**; this full run replaces the `anon` write path with an `authenticated` one, but the population stays open — nobody is ever invited or named onto a fixed list, they simply prove an email and become the one role.
-**Date:** 24 September 2026
+**Written against:** product-spec.md v2.0 · supabase-setup.md as of 18 September 2026 (pre-`user_roles`)
+**Population pattern:** P1 — public, stays anonymous
+**Date:** 25 September 2026
 **Author:** Isa
 **Status:** Confirmed
 **Companion file:** user-stories.md
 
-> The source of truth for who may do what. The Project Governor lifts Section 7 into
-> CLAUDE.md. Claude Code builds the login and every line of Section 6 with the mechanism
-> that line names, in the same pass. The screen test as the named tester triggers every
-> `no` and the one `own` boundary in Section 1. The handover ships this file unchanged.
-> Section 6 of product-spec.md points here from v3.1 on.
+> The source of truth for who may do what. The Project Governor lifts Section 7 into CLAUDE.md. Claude Code builds `user_roles`, the Admin capability, and the tightened `set_submission_status()` with the mechanism each line here names, in one pass with the login work already in place. The screen test as each named person triggers every `no` and every `own` in Section 1. The handover ships this file unchanged. product-spec.md Section 6 points here and holds no separate grid of its own beyond its own RLS table (reconciled below).
 >
-> This tool has no profiles table, no admin role, no lookup tables, no history table and
-> no storage buckets. That is not an omission — it is what A2 with one undifferentiated
-> role and no in-app admin action actually requires. Each absence is stated below with the
-> reason, so nobody reintroduces it by habit.
+> Every cell names a real table and one of the seven actions. A screen or route is never a cell; screen refusals live in user-stories.md. Export never exceeds read (the Export Arm is inactive on this tool, so export is `no` everywhere).
 
 ---
 
 ## 1. The matrix
 
-Legend: `yes` = all rows · `own` = rows the role owns (definition in Section 2) · `no` =
-refused, in the database, not only in the screen · `—` = not applicable to this table.
+Legend: `yes` = all rows · `own` = rows the role owns (Section 2) · `no` = refused, in the database, not only in the screen · `—` = not applicable to this table · `via Function` = enforced by the Netlify admin function using the service role key, not by RLS.
 
-Actions are always these seven, in this order: create, read, update, change state, delete,
-export, maintain lists.
+Actions are always these seven, in this order: create, read, update, change state, delete, export, maintain lists.
 
-### companies
+### companies *(portal-owned; the dashboard never writes to it)*
 
-| Action | Verified Supplier | anon (no login) |
-|---|---|---|
-| create | no (only via `resolve_company()`) | no |
-| read | no | no |
-| update | no (only via `resolve_company()`) | no |
-| change state | — (no states) | — |
-| delete | no | no |
-| export | no | no |
-| maintain lists | — (not a lookup table) | — |
-
-No role ever reads or writes `companies` directly. The only route in is `resolve_company()`,
-unchanged in behaviour from v3.0 except who may call it (Section 5).
+| Action | Reviewer (EHS/ESG) | Procurement | Admin | anon |
+|---|---|---|---|---|
+| create | no | no | no | no *(company rows are created only by the portal's `resolve_company()`, outside this tool's scope)* |
+| read | yes | yes | yes | no |
+| update | no | no | no | no |
+| change state | — | — | — | — |
+| delete | no | no | no | no |
+| export | no | no | no | no |
+| maintain lists | — | — | — | — |
 
 ### submissions
 
-| Action | Verified Supplier | anon (no login) |
-|---|---|---|
-| create | **own** — a row where `contact_email = auth.email()` and `verified_user_id = auth.uid()` | **no** — this is the change this spec makes |
-| read | no (no "my submissions" screen exists — Section 12, out of scope) | no |
-| update | no | no |
-| change state | — (final on insert, no states) | — |
-| delete | no | no |
-| export | no | no |
-| maintain lists | — | — |
+| Action | Reviewer (EHS/ESG, active) | Procurement | Admin | anon |
+|---|---|---|---|---|
+| create | no | no | no | yes — through the existing `anon may insert a submission` policy (`status = 'new'`), built by Tool A, unchanged and out of scope here |
+| read | yes | yes | yes | no |
+| update (direct) | no | no | no | no |
+| change state → `accepted` / `needs_review` | own function call — refused if role not in (`ehs`,`esg`) or `is_active = false` | no | same as Reviewer, through their underlying role | no |
+| change state → `superseded` | no (automatic only) | no | no (automatic only) | no *(the trigger runs inside the anon insert)* |
+| delete | no | no | no | no |
+| export | no | no | no | no |
 
-A submission is frozen the moment it is inserted. There is no draft, no review, no
-withdrawal in this build — unchanged from v3.0, and this spec does not add one.
+### submission_status_changes
 
-### profiles — not built
+| Action | Reviewer | Procurement | Admin | anon |
+|---|---|---|---|---|
+| create | no (automatic — trigger or `set_submission_status()` only) | — | no (automatic) | no (automatic, on supersede) |
+| read | yes (includes the review comment) | yes (includes the review comment) | yes | no |
+| update | no | no | no | no |
+| delete | no | no | no | no |
 
-Not needed. There is exactly one role, no admin flag, and no `active`/`inactive` gating.
-RLS reads `auth.email()` and `auth.uid()` straight off the session's JWT. A profiles table
-would exist only to hold columns this tool has no use for. If a second role or an in-app
-admin ever arrives, this section is revisited then, not seeded now.
+### user_roles *(new)*
 
-### lookup tables — none
+| Action | Reviewer (non-admin) | Procurement (non-admin) | Admin | anon |
+|---|---|---|---|---|
+| create (invite) | no | no | yes — via Function only | no |
+| read (own row) | own | own | own *(same RLS policy as everyone — see below for the roster)* | no |
+| read (full roster) | no | no | yes — via Function only, never through RLS | no |
+| update (role, is_admin, is_active) | no | no | yes on others, via Function; no on self-lockout even via Function | no |
+| delete | no | no | no *(deactivate only, never delete)* | no |
 
-`companies.legal_name`, `submissions.path`, `submissions.door` are free text or a fixed
-check constraint, not dropdown-backed tables. Nothing to maintain here.
-
-### history / audit table — not built
-
-No table has states or corrections to log. `submissions` rows are final on insert and never
-change again; `companies` rows are upserted by `resolve_company()`, which already records
-`updated_at`. Neither needs a change log for this version.
-
-### storage buckets — none
-
-Unchanged from v3.0: no file is ever stored. Only filename and size reach the database.
+Withdraw/reinstate/anonymise do not apply to this tool: submissions have no user-triggered "withdraw," and `user_roles` has no GDPR erasure concept in scope (Section 7 of the spec: not applicable).
 
 ---
 
 ## 2. Ownership
 
-- **submissions**: a row belongs to the verified session that inserted it. Ownership is
-  defined by two columns together, both set at insert and never changed afterward:
-  `contact_email = auth.email()` and `verified_user_id = auth.uid()`. Ownership never
-  transfers, and there is no screen that reads a row back by its owner — the definition
-  exists purely to gate the `create` action.
-- **companies**: not owned by anyone. It is internal reference data, matched by
-  `lower(btrim(legal_name))`, maintained only by `resolve_company()`.
+- **companies**: no ownership concept. Every authenticated login (Reviewer, Procurement, Admin) reads every row equally.
+- **submissions**: no ownership concept. Every authenticated login reads every row equally. Hand-written status changes are gated on the caller's `user_roles.role ∈ (ehs, esg)` and `is_active = true` inside `set_submission_status()` — never on row ownership.
+- **submission_status_changes**: no ownership concept; every authenticated login reads every row; written only by the trigger and the function.
+- **user_roles**: a row belongs to itself — `auth_user_id = auth.uid()`. Through RLS, a user reads only their own row. The full roster is never exposed to any role through RLS, Admin included; it is exposed only through the Netlify Function, after the Function verifies the caller currently holds `is_admin = true`.
 
 ---
 
 ## 3. The people
 
-| Role | Named first holder | Layer | Opens |
+| Role | Named first holder | Layer | Screens |
 |---|---|---|---|
-| Verified Supplier | Isadora (isadorapined@gmail.com), for the screen test — open to anyone in production | business (the only role — A2) | Verify Your Email, Check Your Inbox, Link No Longer Valid, Path Selection, all four doors, Views 5–7, Confirmation |
-| anon | no name — the public visitor before verification | pre-auth | Verify Your Email, Check Your Inbox, Link No Longer Valid only |
-| platform owner | Isa | outside the app | Supabase and Netlify dashboards; reviews submissions directly in the Supabase table editor (service role, bypasses RLS) |
+| Reviewer *(schema labels: `ehs`, `esg` — same permissions)* | Isabela — isabela@gmail.com · Isa — isadorapined@gmail.com | business | Dashboard |
+| Procurement | isabel — isabel@gmail.com | business | Dashboard (view-only) |
+| Admin *(capability on `user_roles.is_admin`, layered on one active Reviewer)* | Isa | app admin | Admin Panel, plus Dashboard |
+| platform owner | Isa, personally | outside the app | Supabase, Netlify |
 
-There is no admin role. The spec is explicit that A2 stops here: nobody has an in-app
-admin action, and adding one would make this A3. Every action a reviewer normally needs —
-reading everything, and any future withdraw/anonymise — happens in the Supabase dashboard
-by the platform owner, exactly as it already does under v3.0's PROGRESS.md ("reviewed
-directly in the Supabase table editor... no review UI in the portal").
+Admin's real action set on this tool (adapted from the skill's generic four, since there are no lookup tables and no record-withdraw concept here): invite · deactivate/reactivate · reset password · reassign role · move Admin · read the full roster. Admin is not exempt from Section 7 rule 3 (self-lockout is refused even for the current Admin).
+
+This is a stack: the portal (Tool A) has the `anon` column and no other role. The dashboard (Tool B) has Reviewer, Procurement, and Admin. One matrix, one database.
 
 ---
 
 ## 4. Exceptions (column-level, not built at the access stage)
 
-None. No field needs hiding from Verified Supplier — the role can read nothing back from
-`submissions` at all, so there is no partially-visible row to worry about.
+None. Procurement reads exactly the same fields on every row it can read (including the review comment) as Reviewer and Admin — there is no column hidden from a role that can otherwise read the row.
 
-**Noted, not a build item this session:** `resolve_company()`'s own parameters
-(`p_contact_email`, `p_contact_name`, etc.) are not checked against `auth.email()`. An
-authenticated supplier can already call it with a legal name that matches an existing
-company and overwrite that company's stored contact fields with any values they choose —
-this is unchanged behaviour carried over from v3.0 (it was equally true under `anon`) and
-is outside Section 5's stated scope for this iteration, which is only about tying
-`submissions.contact_email` to the verified identity. Flagged for a later spec iteration if
-it ever matters; not solved here.
+File storage: no — unchanged from v1.1.
 
 ---
 
-## 5. Schema delta (what the access stage adds to supabase-setup.md, in one pass with the login)
+## 5. Schema delta (what this iteration adds to supabase-setup.md, in one pass)
 
 | Table | Add | Why |
 |---|---|---|
-| `submissions` | `verified_user_id uuid not null default auth.uid() references auth.users(id)` | a durable, non-spoofable link from the row to the session that created it, independent of the `contact_email` text value |
-| — | no `profiles` table | one undifferentiated role, no admin flag — see Section 1 |
-| — | no `created_by` / `updated_by` / `status` / audit columns on `submissions` | the row is never revisited or edited after insert; `submitted_at` (already present) is the only timestamp this tool needs, and ownership is carried by `verified_user_id` + `contact_email` instead of the usual `created_by` |
+| `user_roles` *(new)* | `id` uuid pk default `gen_random_uuid()`; `auth_user_id` uuid unique, FK → `auth.users.id`, set by the Function at invite time; `email` text; `role` text, check-constrained to `ehs` \| `esg` \| `procurement`; `is_admin` boolean default `false`; `is_active` boolean default `true`; `created_at` timestamptz default `now()`; `updated_at` timestamptz | who has which role, and whether they're active or the current Admin |
+| `user_roles` — constraint | a partial unique index on `is_admin` where `is_admin = true`, so at most one row can hold Admin; the Function additionally refuses unsetting the only Admin without setting a new one in the same transaction | the single-admin invariant, enforced in the database, not just the UI |
+| `set_submission_status()` — updated | adds a refusal unless the caller's `user_roles` row has `role ∈ (ehs, esg)` **and** `is_active = true`, on top of its existing v1.1 refusals | Procurement and any deactivated account are refused at the function, not only hidden in the UI |
 
-Seed: nothing to seed. There is no named list of accounts to pre-create — the population is
-open, and the first real row is the tester's own verified submission.
+No separate `profiles` table is introduced — this project keys directly off `auth.users` via `user_roles.auth_user_id`, matching how the dashboard's login has worked since v1.1. The tables win.
+
+Seed: Isa's existing v1.1 login (if it already exists in Supabase Auth) gets a `user_roles` row with `role = 'esg'`, `is_admin = true`, `is_active = true`; Isabela and isabel are invited fresh through the Admin Panel once it exists (open question in spec Section 15 — resolvable during build).
 
 ---
 
-## 6. Policy plan (login and rules together)
+## 6. Policy plan (one line per `own` and per `no`)
 
 | # | Table | Action | Role | Rule in words | Mechanism | Screen test |
 |---|---|---|---|---|---|---|
-| 1 | `submissions` | create | Verified Supplier | insert allowed only when the new row's `contact_email` equals the caller's `auth.email()` and `verified_user_id` equals `auth.uid()` | RLS policy (INSERT) with `WITH CHECK (contact_email = auth.email() AND verified_user_id = auth.uid())` | Isadora verifies, submits a door with her own email pre-filled — succeeds. A direct API insert with a different `contact_email` under her session is refused. |
-| 2 | `submissions` | create | anon | no policy — the current `check (true)` policy for `anon` is dropped | none (default deny; this is the fix) | a direct API insert as `anon`, no session, is refused |
-| 3 | `submissions` | read / update / delete | Verified Supplier | no policy on any of these | none | Isadora cannot read her own row back, cannot edit it, cannot delete it — unchanged from v3.0's behaviour under `anon` |
-| 4 | `companies` | any action | Verified Supplier | no policy on any action | none | Isadora cannot select, insert, update or delete `companies` directly; only `resolve_company()` can |
-| 5 | `resolve_company()` | execute | Verified Supplier (authenticated) | grant execute to `authenticated`; revoke from `anon` | function grant | calling it as `anon` fails; calling it inside an authenticated session succeeds |
-| 6 | every table | any | anon (post-verification-gate) | nothing beyond viewing the three pre-auth screens: no table grant | none (default deny) | a logged-out visitor's direct API calls to `companies` or `submissions` all fail |
-| 7 | `submissions` | delete | everyone, including platform owner via the app | no policy | none | no delete works from any account through the app; rows are only ever removed by the platform owner directly in the Supabase table editor if ever needed |
+| 1 | companies | read | Reviewer, Procurement, Admin | all rows | policy (SELECT) — unchanged from v1.1 | any authenticated login sees every company |
+| 2 | submissions | read | Reviewer, Procurement, Admin | all rows | policy (SELECT) — unchanged from v1.1 | any authenticated login sees every submission |
+| 3 | submission_status_changes | read | Reviewer, Procurement, Admin | all rows, including the review comment | policy (SELECT) — unchanged from v1.1 | any authenticated login sees every log row |
+| 4 | submissions | change state → `accepted`/`needs_review` | Reviewer (role ∈ ehs,esg, active) | via `set_submission_status()`; refuses if role not in (ehs,esg) or inactive, plus the existing v1.1 refusals | function | Isabela/Isa succeed; isabel is refused regardless of parameters |
+| 5 | submissions | change state → `superseded` | nobody, by hand | automatic AFTER INSERT trigger, same route only | trigger — unchanged from v1.1 | no role can set this directly; a same-route resubmission flips it automatically |
+| 6 | companies, submissions, submission_status_changes | create/update/delete (direct) | every authenticated role | no policy exists beyond what's listed above | none (default deny) | no authenticated write succeeds outside `set_submission_status()` |
+| 7 | user_roles | read | any authenticated user | own row only (`auth_user_id = auth.uid()`) | policy (SELECT) | Isa sees her own row; a query for Isabela's row, run as Isa, returns nothing |
+| 8 | user_roles | create/update/delete (direct) | any authenticated user | no policy exists — default deny | none | a direct insert/update/delete from any authenticated session is refused |
+| 9 | user_roles | create (invite), update (role/is_admin/is_active) | Admin only | the Function verifies server-side that the caller is authenticated and currently holds `is_admin = true` before touching the service role key; each action completes fully or leaves the prior state untouched | function (Netlify, service role key) | Isa invites/deactivates/reassigns through the Admin Panel; a non-admin's direct call to the Function is refused |
+| 10 | user_roles | single-admin invariant | database | at most one `is_admin = true` row at any time; unsetting the only Admin without setting a new one in the same statement is refused | constraint (partial unique index) + Function check | removing Isa's Admin without naming a successor is refused, in the UI and via a direct Function call |
+| 11 | every table | any | anon | nothing, except `submissions · create`, which is the existing anon INSERT policy from Tool A's build (`status = 'new'`), predating this tool and out of scope to change | policy (existing, unchanged) / none (default deny elsewhere) | a logged-out visitor to the dashboard reaches nothing; the portal's public form still submits |
+| 12 | Admin Panel (screen) | open | Reviewer, Procurement (non-admin) | no route reaches it; the roster data behind it comes only from the Function, gated on `is_admin` | screen (frontend route guard) + no data path exists for non-admins | isabel or Isabela visiting the Admin Panel URL directly is redirected to the Dashboard |
+| 13 | any account | change own password | the signed-in user only | the Change password path, for the signed-in user only | Supabase Auth (`updateUser`) | each person changes their own password; nobody changes another's outside the Admin's reset action |
 
-Default deny applies to every table: where no line above says yes, the answer is nothing.
+Default deny applies to every table: where no line above says `yes` or names a function, the answer is nothing. Every check against `user_roles` also checks `is_active`, so a deactivated account is refused even while an old session lives (acceptance criterion 26).
 
-**The gate.** Both halves recorded in PROGRESS.md before this stage is deployed.
-**Half A (Claude Code):** attempt lines 2, 3, 4, 5 (as `anon`) and the mismatched-email
-variant of line 1 through the API directly; paste the refusals into PROGRESS.md under
-"Refusal test record." **Half B (Isadora, isadorapined@gmail.com):** verify her own email
-end to end, land on Path Selection, complete one door, confirm the row appears in the
-Supabase table editor with her `contact_email` and a `verified_user_id` matching her
-`auth.users` row.
+**The gate.** The refusal test has two halves, both recorded in PROGRESS.md before this stage is deployed. **Half A (Claude Code, via the API):** every `no` cell above and the `own` boundary on `user_roles · read`, attempted as each named person's session and as a logged-out visitor, results pasted into PROGRESS.md under "Refusal test record." **Half B (the named people, on the screens):** acceptance criteria 23–34 in product-spec.md v2.0 map directly onto rows 1–13 above — run them as Isabela, Isa, and isabel. Any later change to a rule re-runs both halves before the push.
 
 ---
 
 ## 7. Hard rules for CLAUDE.md (the Governor lifts these verbatim)
 
-1. The refusal happens in the database, never only in the screen. RLS is enabled on both
-   tables and never disabled to make something work. `anon` has no policy and no table
-   grant on either table after this build; the only write path for a verified supplier is
-   the `submissions` INSERT policy in Section 6, line 1.
-2. Not applicable to this tool. There is no `role`, `is_admin` or `active` column anywhere
-   in this build — one undifferentiated role, no admin flag — so there is nothing for a
-   user to change even if they tried. If a role or admin flag is ever added later, this
-   rule applies from that point on.
-3. A `submissions` row is frozen for everyone, including the platform owner, from the
-   moment it is inserted. There is no update path in the app at all — not "final after a
-   transition," but final immediately, by design, unchanged from v3.0.
-4. Nothing is deleted through the app. There is no delete policy on either table. The
-   platform owner may remove a row directly in the Supabase table editor (service role,
-   bypasses RLS) if one is ever genuinely needed to go — GDPR is confirmed not applicable
-   for this project, so no anonymisation function is built.
-5. `submissions` carries `verified_user_id` (set automatically to `auth.uid()` on insert)
-   alongside the existing `contact_email` and `submitted_at`, as its full audit trail. It
-   has no `created_by`/`updated_by`/`updated_at`, because it is never updated.
+1. The refusal happens in the database, or in the Netlify Function that holds the service role key and checks every request itself; never only in the screen. RLS is enabled on every table and never disabled. `anon` has no policy or grant beyond the one existing `submissions` INSERT policy it already holds (Tool A's, unchanged). A function holding the service role key bypasses RLS, so for its path the function is the rule.
+2. Nobody changes their own `role`, `is_admin`, or `is_active` through the app — refused at the database even via a direct call to the Function. Another user's `role`, `is_admin`, or `is_active` is changed only by the current Admin, only through the Netlify Function using the service role key — never by a direct RLS policy from the browser, and never trusted to the UI alone. *(This adapts the skill's generic "only the platform owner in the Supabase dashboard" default: this tool deliberately delegates that to an in-app Admin capability, enforced server-side.)*
+3. A submission that is `superseded` is frozen for everyone, Admin included. The only way forward is a new submission on the same route, which supersedes it automatically via the trigger. There is no free edit and no by-hand override.
+4. Nothing is deleted through the app. No `DELETE` policy exists on `companies`, `submissions`, `submission_status_changes`, or `user_roles`. Deactivation, through the Function, is the only "removal" a team member ever undergoes.
+5. `submissions` and `submission_status_changes` already carry their audit trail from v1.1 (`submitted_at`/`changed_at`, `changed_by`/`changed_by_email`). `user_roles` carries `created_at`/`updated_at`. `submission_status_changes` remains the sole history table, filled only by the trigger and `set_submission_status()`.
 
 ---
 
-## 8. Handover paragraph (for the handover package, plain language)
+## 8. Handover paragraph (plain language)
 
-The Corporate Supplier Sustainability Portal has one kind of user: a Verified Supplier, who
-proves they control an email address by clicking a magic link, then submits exactly one
-assessment tied to that address. Nobody is invited onto a list — anyone can verify and
-submit, which is the intended design (validation, not gatekeeping). There is no admin
-inside the app; The Corporate reviews every submission directly in the Supabase table
-editor, which bypasses these rules entirely. A submitted row can never be read back, edited
-or deleted through the portal itself, by the supplier or by anyone else — it is frozen the
-instant it is written, and the database enforces that regardless of what the screen shows.
-The Supabase and Netlify accounts are held by Isa; moving them to a company account changes
-nothing about how these rules work.
+The Corporate Supplier Review Dashboard has three kinds of login. Reviewers (Isabela — EHS, Isa — ESG) see every submission and set its review status and comment. Procurement (isabel) sees exactly the same information but can never change it — enforced both in the screen and, independently, inside the database function itself, so the rule holds even if someone tries to call it directly. Exactly one Reviewer holds the Admin capability at a time — today, Isa — and manages the other two (invite, deactivate, reset password, reassign role) through an in-app Admin Panel that calls a server-side function holding Supabase's service role key, a key that never reaches the browser. Nobody, Admin included, can lock the team out of Admin: dropping it or deactivating yourself requires naming a successor in the same action. Nothing is ever deleted. The rules are enforced in the database and the server function themselves, so they hold regardless of which screen reaches the data. Isa holds the Supabase and Netlify accounts personally.

@@ -1,15 +1,13 @@
-# User Stories — The Corporate Supplier Sustainability Portal 2026
+# User Stories — The Corporate Supplier Review Dashboard 2026
 
-**Written against:** product-spec.md v3.1 · supabase-setup.md as of 11 September 2026
-**Date:** 24 September 2026
+**Written against:** product-spec.md v2.0 · supabase-setup.md as of 18 September 2026 (pre-`user_roles`)
+**Date:** 25 September 2026
 **Author:** Isa
 **Status:** Confirmed
-**Population pattern:** Open self-verification (single role) — see access-matrix.md
-**Companion file:** access-matrix.md (every story below cites exactly one cell)
+**Population pattern:** P1 — public, stays anonymous (suppliers submit through the portal and never log in; the dashboard's team logs in)
+**Companion file:** access-matrix.md (every story below cites exactly one cell of it: `[table · action · role]`; a story that needs two cells is two stories)
 
-> Read by the Project Governor (Iteration Mode) and by Claude Code when it builds the login
-> and the access rules together. Each acceptance line is a screen test. Stories whose cell
-> is `no` are refusal tests and are as important as the others.
+> Read by the Project Governor (Iteration Mode) and by Claude Code when it builds `user_roles`, the Admin capability, and the tightened `set_submission_status()` together. Each acceptance line is a screen test: the named person does the thing and sees the result. Stories whose cell is `no` are refusal tests and are as important as the others.
 
 ---
 
@@ -17,92 +15,67 @@
 
 | Role | Named first holder | Layer | Opens |
 |---|---|---|---|
-| Verified Supplier | Isadora, isadorapined@gmail.com, for the screen test — open to anyone in production | business (the only role — A2) | Verify Your Email, Check Your Inbox, Link No Longer Valid, Path Selection, all four doors, Views 5–7, Confirmation |
-| anon | no name — the visitor before verification | pre-auth | Verify Your Email, Check Your Inbox, Link No Longer Valid only |
-| platform owner | Isa | outside the app | Supabase and Netlify dashboards |
+| Reviewer *(schema stores `ehs` / `esg` as separate labels for the roster; permissions are identical)* | Isabela — isabela@gmail.com (EHS) · Isa — isadorapined@gmail.com (ESG) | business | Dashboard: Overview, Risk Flag Board, Register, Detail |
+| Procurement | isabel — isabel@gmail.com | business | Dashboard: same screens, view-only |
+| Admin *(capability, layered on exactly one active Reviewer account)* | Isa — isadorapined@gmail.com (today, on her ESG account) | app admin | Admin Panel (View 4), plus everything her Reviewer role opens |
+| platform owner | Isa, personally | outside the app | Supabase and Netlify dashboards |
 
-There is no admin role in this tool. A2 is confirmed by the spec as final for this
-iteration: nobody has an in-app admin action. Review happens directly in the Supabase table
-editor, outside the app entirely — see access-matrix.md Section 3.
+This is a stack: the portal (Tool A) has the `anon` column below and no other role. This dashboard (Tool B) has Reviewer, Procurement, and the Admin capability. One matrix, because one database.
+
+---
+
+## The anon / portal stories (unchanged, already built — carried forward for completeness)
+
+- **As a visitor (a supplier), I submit one submission through the portal, so that my company's answers are saved.** `submissions · create · anon`
+  Acceptance: the portal's insert (`status = 'new'`) succeeds through the existing RLS `INSERT` policy — built in Tool A, not part of this dashboard's scope.
+- **As a visitor, I cannot read any submission or company, so that nothing leaks.** `submissions · read · anon` (= no) · `companies · read · anon` (= no)
+  Acceptance: a direct read from the browser returns a permission error, not an empty list.
+- **As a visitor, I cannot edit a submission; submitting again on the same route supersedes the old one automatically, never by my own request.** `submissions · update · anon` (= no)
+  Acceptance: no edit screen exists; the AFTER INSERT trigger flips the prior row on the same `(company_id, path)` to `superseded`, with an automatic log entry.
 
 ---
 
 ## Stories by role and screen
 
-### Verified Supplier — Verify Your Email
+### Reviewer (Isabela — EHS, Isa — ESG) — Dashboard
 
-- **As a visitor, I enter my email and request a magic link, so that I can prove I control
-  it before submitting anything.** `[submissions · create · anon]` (= no, at this point —
-  the request itself writes nothing to any table; it only calls Supabase Auth)
-  Acceptance: Isadora enters `isadorapined@gmail.com`, submits, and the screen moves to
-  Check Your Inbox. A malformed address is rejected client-side with no send attempted
-  (criterion 21).
+- **As a Reviewer, I see every submission with its risk flags and status, so that I can act on risk quickly.** `submissions · read · Reviewer`
+  Acceptance: Isabela opens the Register and sees every current submission, including ones from companies she has never reviewed before.
+- **As a Reviewer, I open a submission's detail page and set its status to Accepted or Needs review, writing a comment when required, so that the review outcome is recorded.** `submissions · change state → accepted/needs_review · Reviewer`
+  Acceptance: Isa opens a submission, selects Needs review, enters a reason, saves; the status badge updates and a log row appears with her email and the reason.
+- **As a Reviewer, I cannot change a superseded submission's status, so that a stale review is never recorded.** `submissions · change state · Reviewer` (= no on superseded rows)
+  Acceptance: Isabela opens a superseded submission; the status controls refuse the change with "This submission has been superseded and is locked."
+- **As a Reviewer, I read only my own `user_roles` row, so that my role shows correctly in the top bar and I cannot see teammates' rows.** `user_roles · read · Reviewer` (= own)
+  Acceptance: Isa's top bar shows "isadorapined@gmail.com · ESG"; a direct query for Isabela's row, run as Isa, returns nothing.
 
-### Verified Supplier — Check Your Inbox
+### Procurement (isabel) — Dashboard
 
-- **As a visitor, I click the link in my inbox and land inside the tool, so that I don't
-  have to remember a password.** `[submissions · create · Verified Supplier]` (the click
-  itself creates the session that later gates this cell — nothing is written yet)
-  Acceptance: Isadora opens the email on the same device and clicks the link; she lands on
-  Path Selection (View 2), not the Landing page, with a live session (criterion 23).
-- **As a visitor, if nothing arrives, I request a fresh link, so that I'm not stuck.**
-  Acceptance: Isadora clicks resend; a new email arrives at the same address (criterion 25).
+- **As Procurement, I see every submission with its risk flags, status and review comment, so that I can decide which suppliers to engage commercially.** `submissions · read · Procurement` · `submission_status_changes · read · Procurement`
+  Acceptance: isabel opens the Register and any detail page and sees the same information Isabela and Isa see, including existing comment text.
+- **As Procurement, I cannot set a status or write a comment, so that only EHS/ESG review outcomes are ever recorded.** `submissions · change state · Procurement` (= no)
+  Acceptance: isabel's detail page renders no Save-status button and no editable comment field; calling `set_submission_status()` directly from her authenticated session is refused regardless of parameters.
 
-### Verified Supplier — Link No Longer Valid
+### Admin (Isa) — Admin Panel
 
-- **As a visitor, if my link has expired or was already used, I see a clear message
-  instead of a confusing failure, so that I know what to do next.**
-  Acceptance: Isadora clicks a link twice; the second attempt shows "Link No Longer Valid"
-  with a path back to email entry, not a raw error (criterion 24).
+- **As Admin, I invite a new team member with a role, so that access follows the team.** `user_roles · create · Admin` (via the Netlify Function)
+  Acceptance: Isa enters isabel's email and role Procurement in the Admin Panel; a starter password shows once and isabel can log in with it.
+- **As Admin, I deactivate a team member's access, so that a leaver is refused at once.** `user_roles · update (is_active) · Admin`
+  Acceptance: Isa deactivates a test account; its next login attempt fails, and any already-open session's next request also fails — not just a role check.
+- **As Admin, I reset a team member's password, so that they regain access without touching the Supabase dashboard.** `user_roles · update · Admin`
+  Acceptance: Isa resets Isabela's password; the old one stops working and the new one, shown once, works.
+- **As Admin, I reassign a team member's role, so that responsibilities can shift without recreating an account.** `user_roles · update (role) · Admin`
+  Acceptance: Isa changes isabel's role from Procurement to EHS; without logging out, isabel's next status-change attempt succeeds.
+- **As Admin, I move the Admin capability to another active Reviewer account, so that the team is never left without one.** `user_roles · update (is_admin) · Admin`
+  Acceptance: Isa moves Admin to Isabela; Isa's Admin Panel entry point disappears and Isabela's appears, in the same action.
+- **As Admin, I cannot deactivate my own account or drop my own Admin status without naming a successor in the same action, so that the team can never be left with zero admins.** `user_roles · update · Admin` (= no, self-lockout)
+  Acceptance: Isa's own row shows no deactivate toggle and no bare "remove Admin" control; a direct call to the Function attempting either is refused.
+- **As Admin, I read the full team roster, so that I can support the team.** `user_roles · read · Admin` (via the Function only, service role key, bypasses RLS after checking `is_admin`)
+  Acceptance: Isa opens the Admin Panel and sees every member's email, role, Admin flag and active status; a non-admin's direct query against `user_roles` never returns more than their own row.
 
-### Verified Supplier — Company & Contact (all four doors)
+### Reviewer, Procurement — Admin Panel (refusal)
 
-- **As a Verified Supplier, my contact email is pre-filled and locked to the address I
-  verified, so that I can't accidentally (or deliberately) submit under a different
-  identity than the one I proved.** `[submissions · create · Verified Supplier]`
-  Acceptance: on any of the four doors, `contact_email` shows Isadora's verified address and
-  is not editable; every other field (legal name, country, contact name, title) stays free
-  text (criterion 26).
-
-### Verified Supplier — any door, submitting
-
-- **As a Verified Supplier, I create exactly one submission tied to my verified email, so
-  that The Corporate can trust the identity behind it.** `[submissions · create ·
-  Verified Supplier]` (= own)
-  Acceptance: Isadora completes a door and submits; the row lands in `submissions` with
-  `contact_email = isadorapined@gmail.com` and `verified_user_id` matching her
-  `auth.users` row. A direct API insert attempt with a different `contact_email` under her
-  session is refused by the database, not just hidden by the UI (criterion 27, 28).
-- **As a Verified Supplier, I cannot read back any submission, mine included, so that
-  nothing leaks.** `[submissions · read · Verified Supplier]` (= no)
-  Acceptance: there is no "my submissions" screen; a direct read attempt from Isadora's
-  session returns a permission error, not her own row. The confirmation screen renders from
-  in-browser state, unchanged from v3.0.
-- **As a Verified Supplier, I cannot edit or delete a submission once made, so that the
-  record stays honest.** `[submissions · update · Verified Supplier]` (= no) /
-  `[submissions · delete · Verified Supplier]` (= no)
-  Acceptance: no edit or delete control exists anywhere in the portal; a direct attempt at
-  either is refused by the database.
-
-### anon — before verification
-
-- **As a visitor with no verified session, I cannot submit anything, so that a submission
-  is always tied to a real mailbox.** `[submissions · create · anon]` (= no)
-  Acceptance: a direct API insert attempt into `submissions` with no session is refused —
-  this is the actual fix this spec makes, replacing v3.0's `anon` `check (true)` policy.
-- **As a visitor with no verified session, I cannot read or write `companies` either, so
-  that supplier contact data never leaks.** `[companies · any · anon]` (= no)
-  Acceptance: unchanged from v3.0 — a direct call as `anon` against `companies` returns
-  nothing, in every case.
-
-### platform owner (Isa) — outside the app
-
-- **As the platform owner, I review every submission directly in the Supabase table
-  editor, so that I don't need a review screen built into the portal.** `[submissions ·
-  read · platform owner]` (outside RLS entirely — service role)
-  Acceptance: Isa opens the Supabase table editor and sees every row, joined to its company,
-  exactly as documented in supabase-setup.md's reviewing-submissions query. Unchanged by
-  this spec.
+- **As a non-admin, I cannot open the Admin Panel, so that account management stays with the one Admin.** *(screen refusal — no table cell; the route itself is guarded, and the data behind it never reaches anyone but the Admin)*
+  Acceptance: isabel and Isabela see no link to the Admin Panel; a direct visit to its URL redirects to the Dashboard.
 
 ---
 
@@ -110,24 +83,20 @@ editor, outside the app entirely — see access-matrix.md Section 3.
 
 | # | Who | Tries | Result | Cell |
 |---|---|---|---|---|
-| 1 | anon (no session) | insert into `submissions` | refused by RLS | `submissions · create · anon` |
-| 2 | anon (no session) | select/insert/update/delete `companies` | refused by RLS (no policy) | `companies · any · anon` |
-| 3 | Isadora (verified) | insert a `submissions` row with a `contact_email` other than her own | refused by `WITH CHECK` | `submissions · create · Verified Supplier` |
-| 4 | Isadora (verified) | select her own `submissions` row back | nothing returned — no read policy exists | `submissions · read · Verified Supplier` |
-| 5 | Isadora (verified) | update or delete her own `submissions` row | refused — no policy for either | `submissions · update/delete · Verified Supplier` |
-| 6 | anon (no session) | call `resolve_company()` | refused — execute revoked from `anon` | `resolve_company · execute · anon` |
-| 7 | anyone, any role | delete a `submissions` or `companies` row through the app | no delete policy anywhere | `any table · delete · any role` |
-| 8 | Isadora | click an expired or reused magic link | "Link No Longer Valid" screen, not an error page | screen refusal, criterion 24 |
+| 1 | isabel (Procurement) | call `set_submission_status()` directly | refused regardless of parameters | `submissions · change state · Procurement` |
+| 2 | isabel or Isabela | visit the Admin Panel URL directly | redirected to the Dashboard | screen refusal |
+| 3 | any authenticated user | query `user_roles` for another person's row | returns nothing | `user_roles · read · role` |
+| 4 | any authenticated user | insert, update or delete a `user_roles` row directly | refused — no policy exists | `user_roles · create/update/delete · role` |
+| 5 | anon (logged out) | read `companies`, `submissions`, `submission_status_changes`, or any row of `user_roles` | nothing returned | `* · read · anon` |
+| 6 | Isa (current Admin) | deactivate her own account, or drop her own Admin status without naming a successor | refused, both in the UI and via a direct Function call | `user_roles · update · Admin` |
+| 7 | anyone | delete a submission, a company, or a status-change row | no delete anywhere | `* · delete · *` |
+| 8 | anyone | edit a superseded submission | refused: "This submission has been superseded and is locked." | `submissions · update/change state · *` |
 
 ---
 
 ## Later list (not this version)
 
-- `resolve_company()`'s own parameters are not checked against `auth.email()` — an
-  authenticated caller could still overwrite an existing company's contact fields with
-  arbitrary values by passing a matching legal name. Pre-existing since v3.0 under `anon`;
-  unaffected by this iteration. Flag for a future spec if it ever matters.
-- No "my submissions" or account screen — explicitly out of scope (spec Section 12); would
-  require a read policy and a UI, and isn't wanted.
-- No admin role, no withdraw/reinstate/anonymise mechanism — GDPR confirmed not applicable
-  for this class/portfolio project; revisit if that ever changes.
+- A fourth, dedicated Admin role separate from EHS/ESG.
+- More than one simultaneous Admin.
+- An audit log of admin actions themselves (who invited/deactivated/reassigned whom, and when) — `user_roles`' current state is the only record kept.
+- In-app self-service "forgot password."

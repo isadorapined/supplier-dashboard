@@ -1,28 +1,34 @@
-# The Corporate Supplier Sustainability Portal 2026
+# The Corporate Supplier Review Dashboard 2026
 
 ## Identity
-A public single-page portal where Tier 1 supplier contacts verify a real email address via a Supabase Auth magic link, then complete and submit The Corporate's ESRS-aligned 2026 sustainability assessment, persisted to Supabase and linked to a reusable company record.
-Tier: 3 — public assessment form gated by email verification (magic link); one undifferentiated role, no in-app admin (D3+A2)
-Spec version governed: v3.1 — the version of docs/product-spec.md these rules were derived from. docs/product-spec-v2.1.md and the v3.0 spec remain authoritative for everything v3.1 does not override.
-Position: Standalone — its own Supabase project, not part of a stack.
+An internal, login-protected dashboard where a small invited team at The Corporate reviews every supplier submission the portal has saved, sees risk flags, and sets a review status and comment. EHS and ESG can review; Procurement can only view. One EHS or ESG account also holds an Admin capability, managed from an in-app Admin Panel, to invite team members, deactivate access, reset passwords, and reassign roles.
+Tier: 3 — data persists to Supabase, login is required, and permissions differ by role (D3+A3, changed from D3+A2 in v1.1).
+Spec version governed: v2.0, the version of docs/product-spec.md these rules were derived from.
+Position: Tool B of 2 in The Corporate stack. It shares the Supabase project with The Corporate Supplier Sustainability Portal 2026 (Tool A, public, no login, created the schema, live at https://the-corporate-sep.netlify.app) and builds on the portal's existing schema. This dashboard's copy of docs/supabase-setup.md is the current one; after any database change here, copy it back into the portal repo's docs/.
 
 ## Session Protocol
 At the start of every session:
 1. Pull the latest from main before reading anything else.
-2. Check docs/product-spec.md: if its version is newer than the "Spec version governed" line above, STOP and tell the builder: "The spec has changed since this CLAUDE.md was written — re-run the Project Governor on the revised spec before building, or these rules may contradict it." Do not build against a stale CLAUDE.md.
-3. Read PROGRESS.md in the project root — it is the current state of this build. If it is missing, recreate it with the structure at the end of this section, then continue.
+2. Check docs/product-spec.md. If its version is newer than the "Spec version governed" line in this file, STOP. Tell the builder: "The spec has changed since this CLAUDE.md was written — re-run the Project Governor on the revised spec before building, or these rules may contradict it." Do not build against a stale CLAUDE.md.
+3. Read PROGRESS.md in the project root. It is the current state of this build. If it is missing, recreate it with the structure at the end of this section, then continue.
 4. Increment the session number and update the date in PROGRESS.md.
-5. If "Notes for next session" has content: repeat the notes back to the builder, treat them as this session's priorities, then clear the section.
-6. If this is session 1, run First Session Setup below before any build work (already completed for this project: docs/ created, data-leaf-brand skill installed at .claude/skills/data-leaf-brand/).
+5. If "Notes for next session" has content, repeat the notes back to the builder, treat them as this session's priorities, then clear the section.
+6. If this is session 1, run First Session Setup below before any build work.
 
 Save point — after completing any module, feature, fix, or schema change:
 1. Update PROGRESS.md: current state, remaining work, build decisions, known issues.
-2. If the database was touched (any table, policy, or auth change), update docs/supabase-setup.md in the same save point, and make sure the change's migration file is in supabase/migrations/ and committed with it.
+2. If the database was touched (any table, column, policy, function, trigger, or auth change), update docs/supabase-setup.md in the same save point, and make sure the migration file is saved in supabase/migrations/. Tell the builder to copy the refreshed file back into the portal repo's docs/.
 3. Commit and push to main.
 4. Tell the builder in one line: "Save point committed: [what changed]."
-Do not start the next piece of work before the save point is pushed. Never end a session without one — an ending session is a save point.
+Do not start the next piece of work before the save point is pushed. Never end a session without one. An ending session is a save point.
 
-PROGRESS.md structure (for the recreate rule): status header (Session / Last updated / Live URL / Stage / Supabase project), Current state, Last session (3–5 lines, replace each session), Remaining work (shrinking checklist), Refusal test record, Build decisions, Known issues, Backlog, Notes for next session.
+First Session Setup (session 1 only — already complete for this project; kept here for reference and for a rebuild):
+1. Create docs/. Move product-spec.md, access-matrix.md, user-stories.md and supabase-setup.md into it.
+2. Install the brand skill: create .claude/skills/data-leaf-brand/ and place the provided SKILL.md and tokens.css there.
+3. Copy questions.js, ecovadis.js and format.js (the portal's own files) into src/lib/ unchanged. Never edit them.
+4. Announce what moved, then commit and push before building anything.
+
+PROGRESS.md structure (for the recreate rule): status header (Session / Last updated / Live URL / Stage / Supabase project), Current state, Last session (3–5 lines, replace each session), Remaining work (shrinking checklist), Refusal test record, Build decisions (one line each), Known issues, Notes for next session.
 
 ## Commands
 ```
@@ -32,88 +38,120 @@ npm run build
 ```
 
 ## Tech Stack
-React · Vite · Tailwind CSS · shadcn/ui · Netlify · Supabase (database + Auth). SheetJS (`xlsx`) as an npm dependency for browser-side spreadsheet parsing — bundled at build time, never a server call.
-Deployment: GitHub push to main → Netlify auto-deploys from main. Claude Code does not connect to Netlify; the builder connected the repo to the Netlify site and Supabase to that site with the Supabase extension in an earlier session. A redeploy is needed after any environment variable change (Vite bakes browser-side variables in at build time).
+React · Vite · Tailwind CSS · shadcn/ui · Netlify · Supabase (Auth + Postgres)
+Deployment: GitHub → Netlify, auto-deploys from main. This is the dashboard's own repo and its own Netlify site, never the portal's. Netlify MCP is not active. The builder connects the repo and enters environment variables in the Netlify dashboard.
 
 ## Arms
-Export — browser only, no server function — XLSX: the blank official questionnaire template served as a static asset from /assets/ through an anchor with the `download` attribute. Nothing is generated at runtime and no supplier data is ever written into it.
-Email, AI API, and Scheduled Automation arms: Not Active. The magic-link email is sent by Supabase Auth's own mechanism, not by an Email Arm — do not build a custom email arm for it.
+Admin / User-Management — user-triggered (a button in the Admin Panel) — /netlify/functions/admin-actions.js — invite, deactivate/reactivate, reset password, reassign role or Admin. Uses the Supabase service role key, server-side only. Verifies on every call, itself, that the caller is authenticated and currently holds Admin — never trusts the UI hiding a button.
 
 ## Environment Variables
-VITE_SUPABASE_URL — written by the Supabase extension — browser — public
-VITE_SUPABASE_ANON_KEY — written by the Supabase extension — browser — public; RLS protects the data
-No new variables for this build. Supabase Auth's magic link works off the existing pair above.
+VITE_SUPABASE_URL — Supabase, Project Settings → API → Project URL — browser — public. Unchanged from v1.1.
+VITE_SUPABASE_ANON_KEY — Supabase, Project Settings → API → anon/publishable key — browser — public. Unchanged from v1.1.
+SUPABASE_SERVICE_ROLE_KEY — Supabase, Project Settings → API (copy button, never by mouse selection) — Netlify Functions only — SECRET. New this iteration; exists on the project already, simply unused until now. Never VITE_-prefixed, never in any committed file, never reaches the browser.
+At session start, confirm .env.local exists (the VITE_ pair only — the service role key is never used by the local browser client) and prompt the builder if missing. Leave "Contains secret values" unticked for the VITE_ pair in Netlify; tick it for the service role key. After setting or changing any of these, run "Deploy project without cache."
 
 ## Supabase
-Project: "The Corporate" — already exists. Project URL: https://smnrfopzzzhazkehcqqn.supabase.co (ref `smnrfopzzzhazkehcqqn`). docs/supabase-setup.md is the schema source of truth. Read it before any database work. Never recreate tables or policies that already exist. Update it at every save point that touches the database.
-Plan: Free — explicitly confirmed acceptable for current testing-scale traffic. This is also why Supabase's own built-in auth mailer (low send rate) is tolerated rather than a Resend-verified domain; see Known Issues.
+Project: "The Corporate" (smnrfopzzzhazkehcqqn) — already exists. Project URL: https://smnrfopzzzhazkehcqqn.supabase.co
+docs/supabase-setup.md is the schema source of truth. Read it before any database work. Never recreate tables or policies that already exist. Update it at every save point that touches the database, then tell the builder to copy it into the portal repo.
+Plan: Free. Pauses after about a week without traffic, taking both tools down.
 
-Tables: `companies` (unchanged). `submissions` (existing fields unchanged) plus new `verified_user_id uuid not null default auth.uid() references auth.users(id)`.
+Existing tables (owned by the portal — read-only for this tool, never alter):
+companies: id, legal_name, registered_country, contact_name, contact_title, contact_email, created_at, updated_at
+submissions: id, company_id (FK → companies.id), path, door, answers (jsonb), attached_file_name, attached_file_size, signatory_name, declaration_date, submitted_at, status
 
-RLS — enabled on both tables, never disabled. Population pattern: open self-verification (single role, no named list) — anyone may prove an email and become a Verified Supplier; nobody is invited. Every rule below is lifted from docs/access-matrix.md; build each with the mechanism its policy plan names.
-- `companies`: no policy for any role, on any action. The only route in is `resolve_company()`.
-- `submissions`: `anon` — no policy on any action (this replaces v3.0's `anon` `check (true)` INSERT policy — the actual fix this build makes). `authenticated` (Verified Supplier) — INSERT only, `WITH CHECK (contact_email = auth.email() AND verified_user_id = auth.uid())`; no SELECT, UPDATE, or DELETE policy for any role.
-- `resolve_company()`: execute granted to `authenticated` only — moved from `anon`, revoked from `anon` and `public`.
+Existing dashboard table (built in v1.1, unchanged):
+submission_status_changes: id, submission_id (FK → submissions.id), from_status, to_status, reason, changed_by, changed_by_email, changed_at
 
-Auth, as built: **magic link (passwordless)**, not the framework's default email+password — a deliberate deviation because this is an open, unvetted-supplier context, not an admin-managed list. Settings: "Enable sign-ups" ON (open signup is the design), email OTP/magic link flow, no password anywhere. No Change Password screen and no admin password reset exist or are needed — the only recovery path is requesting a fresh link (the Check Your Inbox screen's resend action). No named first holders to seed; the population is open. Login upgrade path (a Resend-verified sending domain, same mechanism otherwise) is a handover item, not a build item.
+New table this iteration — build via Supabase MCP, then document in docs/supabase-setup.md:
+user_roles: id (uuid, pk, default gen_random_uuid()), auth_user_id (uuid, unique, FK → auth.users.id, set by the admin function at invite time), email (text), role (text, check in ehs|esg|procurement), is_admin (boolean, default false), is_active (boolean, default true), created_at (timestamptz, default now()), updated_at (timestamptz). A partial unique index on is_admin where is_admin = true enforces exactly one admin at any time; the admin function additionally refuses unsetting the only admin without setting a new one in the same transaction. No separate profiles table — this project keys directly off auth.users via user_roles.auth_user_id (docs/access-matrix.md §5), not the generic profiles pattern.
 
-Every access rule lives in docs/access-matrix.md; build each line of its policy plan with the mechanism it names and never loosen a table to make a screen work.
+RLS — every rule below is lifted from docs/access-matrix.md; build none from memory.
+companies: anon has no access (unchanged). authenticated may select all rows (unchanged). No writes.
+submissions: anon may insert with status = 'new' only (unchanged). authenticated may select all rows (unchanged). No direct update or delete; status changes only through set_submission_status().
+submission_status_changes: anon has no access (unchanged). authenticated may select all rows, including the review comment (unchanged). Written only by the trigger and set_submission_status().
+user_roles: anon has no access. authenticated may select only their own row (auth_user_id = auth.uid()) — no policy exposes the full roster to anyone, Admin included. No authenticated insert, update or delete — every write goes only through the Netlify admin function using the service role key, which bypasses RLS by design after checking the caller currently holds is_admin = true.
 
-After setup, update docs/supabase-setup.md at every save point that touches the database, following its existing structure.
+set_submission_status(p_submission_id, p_new_status, p_reason) — updated this iteration. In addition to its existing v1.1 refusals (null auth.uid(), target other than accepted/needs_review, blank reason for needs_review, no-op, superseded row), it now also refuses unless the caller's user_roles row has role in (ehs, esg) and is_active = true.
+
+Change password: a signed-in user changes their own password via Supabase Auth's updateUser(); nobody changes another's this way. A forgotten password is reset by the Admin through the Admin Panel (service role key, server-side) — never in the Supabase dashboard.
+
+Auth: email and password, invite-only, unchanged. "Allow new users to sign up" stays OFF. What changes: the admin now invites, deactivates, resets, and reassigns from the in-app Admin Panel (Netlify Function, service role key) instead of the Supabase dashboard's Authentication → Users screen — the underlying admin-managed model is the same; only the door changed.
 
 ## Hard Rules
-- API keys never hardcoded or committed — always read from environment variables, through the Supabase client. The anon key is public by design, shipped in the bundle; RLS is what makes that safe.
-- Netlify Identity: never. Supabase Auth (magic link, as built above) is the only authentication system in this stack.
-- RLS: enabled on every table from the moment it is created, never disabled on any table, at any tier. If a query fails, fix the policy or the query. `anon` has no policy and no table grant on either table.
-- Migrations: every schema, policy, trigger, and function change goes through `apply_migration` with a descriptive name, saved as a file in supabase/migrations/, committed with the save point; `execute_sql` is for reads and data fixes only.
-- Function contract: `resolve_company()` is the only SECURITY DEFINER function in this build, with a fixed `search_path`; execute is revoked from `anon` and `public`, granted to `authenticated` only. No RPC is callable by `anon`.
-- A submission that fails to save never shows the confirmation screen; the transparency notice claims the information is stored, so reaching View 7 on a failed write would make the portal lie. Stay on the door, keep the answers, say plainly that nothing was sent, allow a retry.
-- The transparency notice wording and the persistence behaviour change together, in one commit, always.
-- The EcoVadis PDF and the uploaded/downloaded workbook are never uploaded to Supabase Storage or any server. Only filename and size are recorded, on the `submissions` row.
-- Company matching at submit time (via `resolve_company()`): look up `companies` by `legal_name`, case-insensitive, leading/trailing whitespace ignored. On a match, reuse that `company_id` and overwrite the contact fields and `updated_at`. On no match, insert a new row. Never fuzzy matching.
-- [From docs/access-matrix.md §7, verbatim] The refusal happens in the database, never only in the screen. `anon` has no policy and no table grant on either table after this build; the only write path is the `submissions` INSERT policy above.
-- [From docs/access-matrix.md §7] Not applicable to this tool: there is no `role`, `is_admin`, or `active` column anywhere — one undifferentiated role, no admin flag — so there is nothing for a user to change even if they tried.
-- [From docs/access-matrix.md §7] A `submissions` row is frozen for everyone, including the platform owner, from the moment it is inserted — final immediately, not "final after a transition." There is no update path in the app.
-- [From docs/access-matrix.md §7] Nothing is deleted through the app. The platform owner may remove a row directly in the Supabase table editor (service role, bypasses RLS) if ever genuinely needed — GDPR is confirmed not applicable, so no anonymisation function is built.
-- [From docs/access-matrix.md §7] `submissions` carries `verified_user_id` (set to `auth.uid()` on insert) alongside `contact_email` and `submitted_at` as its full audit trail. No `created_by`/`updated_by`/`updated_at` — the row is never updated.
-- GDPR: not applicable, confirmed by the builder as a class/portfolio project — reconfirmed even after being shown that open signup plus login identities would normally trigger this section. This is a conscious override; do not reopen it without the builder revisiting it.
-- Complexity: build no rate limit, queue, retry, scan, or monitor. If ever requested, it goes on the PROGRESS.md Backlog as "not in place; what it would take."
+- API keys never in any frontend file or GitHub commit. VITE_ variables only for the browser-safe pair; SUPABASE_SERVICE_ROLE_KEY lives only in the Netlify Function's server-side environment and is never VITE_-prefixed.
+- Netlify Identity: never. Supabase Auth is the only authentication system in this stack.
+- RLS: never disabled on any table, including the new user_roles. If a query fails, fix the policy or the query.
+- Function contract: set_submission_status() stays SECURITY DEFINER with a fixed search_path, execute granted to authenticated only, revoked from public and anon. The four admin actions are never implemented as a Postgres function — they run entirely inside the Netlify Function using the service role key, which is the rule for that path (RLS does not apply to it); it validates every input and checks the caller is authenticated and is_admin before touching anything.
+- Refusal happens in the database, or in the Netlify Function that holds the service role key and checks every request itself — never only in the screen.
+- Nobody changes their own role, is_admin, or is_active through the app — refused even via a direct call to the admin function. Another user's role, is_admin, or is_active is changed only by the current Admin, only through the Netlify Function using the service role key — never by a direct RLS policy from the browser.
+- Exactly one is_admin = true row at all times. The current Admin cannot deactivate their own account or drop their own Admin status without naming a successor in the same action, in the UI and via a direct Function call.
+- Deactivation is two things together: user_roles.is_active = false AND banning the person's Supabase Auth login via the Admin API, so an already-open session's next request also fails — not just a role check.
+- Nothing is deleted through the app. No DELETE policy exists on companies, submissions, submission_status_changes, or user_roles. Deactivation is the only "removal" a team member ever undergoes.
+- This tool shares a Supabase project with the Supplier Sustainability Portal. Protected objects: companies and submissions' existing columns, resolve_company() (stays revoked from authenticated), and the companies table's anon lockout. Make no changes to them beyond what's documented here. Never grant anything new to anon.
+- Never change anything in the portal's repo, code, pages, fields, routes or submission flow.
+- Status changes by hand happen only through set_submission_status(). Never add an update policy on submissions.
+- No direct authenticated writes to user_roles — no insert/update/delete policy exists on it, by design.
+- No supplier data, and no team roster, is fetched before login. A logged-out visitor sees only the Login view.
+- Migrations: every schema, policy, trigger and function change goes through apply_migration with a descriptive name and is saved as a file in supabase/migrations/, committed with the save point. execute_sql is for reads and data fixes only.
+- Every access rule comes from docs/access-matrix.md and is built with the mechanism its policy plan names (policy or function). If a rule is needed that the matrix doesn't state, stop and ask — never invent one.
+- The access phase (schema, policies, the admin function, the Admin Panel, hiding Procurement's controls, the Change password screen) is built as one phase and does not deploy until the two-half refusal test passes: Claude Code tries every "no" cell and the "own" boundary through the API as each named person and logged out; then Isabela, Isa and isabel do the same on the screens.
+- The Supabase client for this tool persists and refreshes the session (persistSession true, autoRefreshToken true). Do not copy the portal's client, which sets persistSession false.
+- Complexity: build no rate limit, queue, retry, scan, monitor, or test suite. None is requested.
+
+## Project Structure
+```
+/                     ← root: CLAUDE.md, PROGRESS.md only
+/src
+  /components
+  /lib                ← Supabase client, questions.js, ecovadis.js, format.js, flag logic
+/netlify/functions    ← admin-actions.js (new: the admin function)
+/docs                 ← product-spec.md, access-matrix.md, user-stories.md, supabase-setup.md
+/supabase/migrations  ← one .sql file per applied migration
+/.claude/skills/data-leaf-brand/   ← brand skill (SKILL.md, tokens.css)
+/public/assets
+```
 
 ## Brand
-Brand is governed by the data-leaf-brand skill at .claude/skills/data-leaf-brand/SKILL.md and its `tokens.css`. Invoke it for any UI, copy, or visual work. Colour roles below hold even if the skill is not loaded:
-- `#EEF4F0` Mint Cream — default page background, light sections, input backgrounds, text on dark surfaces.
-- `#DAD9D9` Silver — form containers, hero stat cards, body text inside dark cards, inactive progress steps.
-- `#0B3142` Deep Space Blue — text/headings on light backgrounds, hero band, all six path/door card backgrounds.
-- `#37663E` Deep Teal — section markers, input bottom borders, checkbox accents, every form submit button.
-- `#B35634` Burnt Clay — navigation/CTA buttons, breadcrumbs, links, "(required)" tags, validation notices, active progress step.
-- Never white backgrounds, never Tailwind blue or gray defaults, no dark mode or theme toggle.
-- Type: DM Sans Medium (500) for headings/stat figures, Inter Regular (400) for body/labels/questions/table content.
-- Voice: analytical, trustworthy, light. No hype, no alarmism, no exclamation points, no emoji.
+Brand is governed by the data-leaf-brand skill at .claude/skills/data-leaf-brand/SKILL.md (installed in First Session Setup). Use its tokens.css for all colours and invoke it for any UI work, including the new Admin Panel.
+Hard rules that hold even if the skill is not loaded:
+- Background: Mint Cream #EEF4F0. Never white, never Tailwind gray defaults. Panels, table headers and the New badge use Silver #DAD9D9.
+- Text and top bar: Deep Space Blue #0B3142. Deep Teal #37663E is used for Log in, Save status, the Accepted badge and section markers.
+- Burnt Clay #B35634 is used for the Needs review badge, raised flag indicators, links and error messages. Never use Tailwind blue defaults.
+- DM Sans 500 for headings and figures, Inter 400 for body, tables and labels. No dark mode, no emoji, no exclamation points.
 
 ## Business Rules
-- Every door (Views 3a, 3b, 5, 6) opens with the identical five-field Company & Contact step. `contact_email` is now pre-filled from the verified session (`auth.email()`) and read-only on all four doors; legal name, registered country, contact name, and contact title remain free text, required, cannot advance otherwise.
-- Verification gates everything: a supplier enters Verify Your Email → Check Your Inbox (with a resend action) before reaching Path Selection. An expired or already-used link shows Link No Longer Valid, with a path back to email entry — never a raw error.
-- "S1" is retired as a numbered assessment section. The guided form (View 5) and upload review (View 6) cover the 28 S2–S7 questions only; denominators are 28 for both, 9 for View 3b (Q1–Q9); View 3a shows no count.
-- Transparency notice text is exactly "Your information is stored for The Corporate's review." — above every submit control and on the confirmation screen. Never reworded, never a modal, never a checkbox.
-- "Start another submission" clears in-browser state only; never undoes or alters a row already written to Supabase.
-- Each verification is one-time per submission attempt — not a returning-user account. No persistent session across visits is expected or built.
+- A submission is current when its status is not 'superseded'. Overview, pie chart, register and flag board use current submissions only.
+- Overview: Total = current submissions, EcoVadis = path 'ecovadis', Questionnaire = path 'full'. Total always equals EcoVadis + Questionnaire.
+- Status: every row arrives as 'new'. By hand, statuses go new → accepted/needs_review, accepted → needs_review, needs_review → accepted. A reason is required only for needs_review. 'superseded' is set only by the trigger and is permanently locked for everyone, Admin included.
+- Superseding is same route only, and automatic via the trigger. There is no free edit and no by-hand override.
+- Risk flags (Cautious rule, unchanged from v1.1): compare answers trimmed and case-insensitive; a blank or missing answer is unanswered; see docs/product-spec.md §9.3 for the full per-question table. Flag count is a plain 0–7 count, no weighting.
+- A company with no current Questionnaire submission shows "Not assessable via questionnaire", sorts after assessable rows, and is hidden under any single-flag filter.
+- role in (ehs, esg) and is_active = true → can set review status and write the review comment; role = procurement, or any role with is_active = false → view-only everywhere, no controls rendered, the function refuses if called directly.
+- is_admin = true → sees and may use the Admin Panel, in addition to whatever role otherwise permits.
+- A role or Admin reassignment takes effect on the person's very next action — no need to log out and back in, since the check is a live read against user_roles, never baked into a token.
+- The top bar shows the logged-in user's email and role (e.g. "isabela@gmail.com · EHS").
+- Contact details are the company's latest on file. Show the spec's caveat note on the detail page.
+- Confirmation messages are worded exactly as in the spec: "Email or password not recognised.", "Status not saved. Nothing was changed. Try again.", "This submission has been superseded and is locked."
 
 Out of scope — do not build:
-- Any review or admin screen inside the portal — reviewed directly in the Supabase table editor. Login for The Corporate's own team (no admin role exists). Save-and-resume for a supplier mid-submission.
-- Storage of the actual uploaded/attached files. Any submission notification — email, webhook, or API. Download of a supplier's own completed answers; an internal EHS review dashboard; a Tier 1 response-rate tracker.
-- AI scoring or gap analysis; automated EcoVadis validation; reading or parsing the uploaded EcoVadis PDF. Formal GDPR consent flow (checkbox, deletion mechanism).
-- Dark mode, theme switching, or any user-selectable colour scheme. Any animation beyond the hero smooth scroll and the 200ms timeline hover.
-- Cross-device magic link handling — suppliers are told to open the link on the device they started on.
-- Custom sending domain / Resend integration — deferred until beyond testing-scale traffic (see Backlog).
-- Password-based login of any kind; a Change Password screen — no passwords exist in this build.
-- Any account settings, profile, or "my submissions" screen. Persistent sessions across return visits.
-- Restricting who may verify or submit — open signup is the whole design; this is validation, not gatekeeping.
+- Roles or permissions beyond EHS, ESG, Procurement, and the Admin capability as specified
+- Any change to the supplier portal
+- Messaging or notifying suppliers, and supplier-facing status
+- CSV or PDF export
+- AI features and scheduled automation
+- Weighting, scoring or grading of risk flags
+- In-app "forgot password" self-service reset, and automatic email on invite or password reset
+- An audit log of admin actions themselves, beyond user_roles' current state
+- More than one simultaneous Admin, or a fourth dedicated Admin role
+- Editing supplier answers or identity, and deleting submissions, companies, or user_roles rows (deactivate only, never delete)
+- Viewing or downloading attached files, and per-submission historical contact details
 
 ## Reference Docs
 Read before building the related part:
-- docs/product-spec.md (v3.0) and docs/product-spec-v3.1.md — v3.1 is the authoritative iteration spec for auth; v3.0 remains authoritative for everything v3.1 doesn't override; docs/product-spec-v2.1.md still governs View 1 and Section 10 visual detail.
-- docs/supabase-setup.md — schema source of truth; read first, never recreate.
-- docs/access-matrix.md — full form. Read before writing any RLS or touching a policy; every policy is built from it, with the mechanism it names.
-- docs/user-stories.md — full form. Read before changing a screen or a role; every acceptance line is a screen test.
+- docs/product-spec.md — views, logic, edge cases and the 34 acceptance criteria
+- docs/access-matrix.md — read before writing any RLS or touching a policy; every policy is built from it (full form: roles, ownership, the policy plan)
+- docs/user-stories.md — read before changing a screen or a role; every acceptance line is a test
+- docs/supabase-setup.md — schema source of truth (exists — read first)
 - .claude/skills/data-leaf-brand/SKILL.md — full brand system and tokens.css
+- src/lib/questions.js, ecovadis.js, format.js — portal data files, copied unchanged
 PROGRESS.md in the root is read at every session start per the Session Protocol.
