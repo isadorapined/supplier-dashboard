@@ -1,25 +1,25 @@
-# Product Spec — The Corporate Supplier Sustainability Portal 2026
+# Product Spec — The Corporate Supplier Review Dashboard 2026
 
-**Version:** 3.1
-**Date:** 24 September 2026
-**Author:** Isa
+**Version:** 2.0
+**Date:** 25 September 2026
+**Author:** Isadora Pineda Stanischeski
 **Status:** Confirmed
 
-> **This is an iteration spec, not a full rewrite.** It documents ONE change against the existing v3.0 build: adding email verification via a Supabase Auth magic link in front of the existing submission flow. Every section below that is not touched by this change says so explicitly and points back to `docs/product-spec.md` (v3.0) and `docs/product-spec-v2.1.md`, which remain authoritative for everything this document does not override. Do not treat this file as replacing them — it sits on top.
+> This is the second tool in a stack. The first tool, The Corporate Supplier Sustainability Portal 2026 (spec v3.0), is built, live, and owns the schema. This dashboard joins the same Supabase project. **Nothing in the supplier portal's code, pages, fields, routes, submission flow, workbook or capture screens changes.** The only effects on the portal are the database additions listed in Section 5, which the portal never reads.
 
 ---
 
 ## Section 1 — Tool Summary
 
-**Tool name:** The Corporate Supplier Sustainability Portal 2026
+**Tool name:** The Corporate Supplier Review Dashboard 2026
 
-**What it does:** A public, no-login-required (until now) single-page portal where Tier 1 supplier contacts complete The Corporate's ESRS-aligned 2026 sustainability assessment and submit it, persisted to Supabase. **This version adds:** the supplier must first prove they own a real, reachable email address via a Supabase Auth magic link before they can proceed into the form.
+**What it does:** An internal, login-protected dashboard that shows every supplier submission the portal has saved. It has three sections: an overview with headline numbers, a risk flag board built from seven Yes/No questionnaire answers, and a searchable supplier register with a full detail page per submission. **EHS and ESG** can set a review status and write the review comment on each submission; **Procurement** can see all of the same information but cannot change anything. Every status change is recorded. One EHS or ESG account also holds an **Admin** capability, managed from an in-app Admin Panel, to invite team members, deactivate their access, reset their password, and assign or change anyone's role.
 
-**Who uses it:** Tier 1 supplier contacts at The Corporate, reached by a direct URL with no invitation or account creation by an admin.
+**Who uses it:** A small, named group at The Corporate. Everyone logs in with email and password. What they can do depends on their role — EHS and ESG review; Procurement only views. Accounts are created by the admin from inside the tool, and nobody can sign themselves up.
 
-**Why this change exists:** Today anyone with the link can submit with zero identity check — a random or fake email can be typed into the Company & Contact step and nothing verifies it. The purpose is validation, not gatekeeping: The Corporate is not trying to restrict who may submit, only to be sure a submission is tied to a mailbox the sender actually controls.
+**Why it exists:** Today the ESG lead has to open the Supabase table editor and read raw JSON to see anything a supplier submitted. This dashboard replaces that with readable screens, surfaces risk at a glance, and gives the team a recorded review status per submission. v1.1 gave everyone the same rights and left admin work to the Supabase dashboard. v2.0 splits reviewing from viewing, and moves user management into the tool itself.
 
-**Build status:** Iteration — v3.0 is live and persisting submissions to Supabase (Tier 2: D3+A1). This build adds email verification, which promotes the tool to Tier 3 (D3+A2). Everything else about the tool — the two paths, the four doors, the 28 S2–S7 questions, the parser, the brand, the confirmation screen, the redirect to EcoVadis or the internal questionnaire — is unchanged.
+**Build status:** Iteration. Previous version (v1.1) was A2 — every logged-in person had identical permissions, and the builder managed users directly in the Supabase dashboard. This version moves to A3: EHS and ESG can review and comment, Procurement can only view, and one EHS/ESG account holds an in-app Admin capability (invite, deactivate, reset password, reassign roles). This is exactly the "User levels / roles" item v1.1 listed under Out of Scope as "planned for a later version" — that version is this one.
 
 ---
 
@@ -27,225 +27,455 @@
 
 ### Data Model
 
-**Decision:** D3 (unchanged from v3.0)
+**Decision:** D3
 
-**Reason:** Unchanged — submissions must persist and be reviewable by The Corporate after the fact.
+| Label | What it means | This tool? |
+|-------|--------------|-----------|
+| D1 — Hardcoded | All data is written into the code by the developer. Users cannot input anything that persists. The tool displays what the developer put in. | No |
+| D2 — Session | Data enters the tool during use and disappears when the tab closes. No database. Covers both uploaded files and form inputs. | No |
+| D3 — Persisted | Data is written to a database and survives after the session ends. Supabase is required. | Yes |
+
+**Reason:** Unchanged from v1.1, plus one new reason: who holds which role, and who is active, must itself persist and be visible to the admin across sessions.
+
+**D3 is triggered if any of the following are true — check all that apply:**
+- [x] Data must be retrievable after the session ends
+- [x] Multiple sessions contribute to the same dataset
+- [x] An audit trail or history is needed
+- [x] Data submitted by one person must be visible to another
+- [ ] Results must be accessible via a URL after the session ends
+- [ ] Files uploaded by users must be stored and retrievable later
+
+---
 
 ### Access Model
 
-**Decision:** A2 — **changed from A1.**
+**Decision:** A3 *(changed from A2)*
 
-| Label | This tool? |
-|---|---|
-| A1 — Public | No — was Yes under v3.0; superseded by this spec |
-| A2 — Authentication | **Yes.** Every supplier verifies their email before submitting. All verified suppliers have identical rights — nobody has an in-app admin action, so this stays A2, not A3. |
-| A3 — Authorization | No |
+| Label | What it means | This tool? |
+|-------|--------------|-----------|
+| A1 — Public | Anyone with the URL can use it. No login, no account required. | No |
+| A2 — Authentication | Users must log in. All logged-in users see the same thing and have the same permissions. Admin work happens in the Supabase dashboard, not in the app. | No |
+| A3 — Authorization | Users must log in and have different roles. Different roles see different data or have different permissions. | Yes |
 
-**Reason:** The tool needs to know a submission came from a real, reachable mailbox. It does not need to know *which* supplier in any privileged sense, and it does not restrict who may verify — anyone can. That is an authentication requirement (prove you own this inbox), not an authorization requirement (different people see different things).
+**Reason:** Three roles now exist (EHS, ESG, Procurement) with different write permissions, and one account additionally holds an in-app Admin capability that manages other accounts — the moment an admin action lives inside the app rather than the Supabase dashboard, the tool is A3 by definition, regardless of how the review permissions had turned out.
 
-**Promotion rule applied:** A2 confirmed → Tier moves from D3+A1 (Tier 2) to D3+A2 (Tier 3). Plain language: the tool now has a "prove you own this email" gate in front of the form. It does not mean roles or an admin screen — that would be A3, and nothing here is A3.
+> **Promotion rule:** Auth requires a database. If the access model is A2 or A3, the data model is D3 — even when all displayed content is fixed. D1/D2 combined with A2/A3 are not valid classifications; they resolve to D3.
 
-### If Access Model is A2 — both questions
+---
 
-**Auth reason:** Identity and continuity — verified email matters. (Not "controlled access": anyone may still verify and submit. Not "ongoing relationship": this is one-time verification per submission, not a returning-user account — confirmed explicitly by the builder, who asked for magic link specifically over email+password for this reason.)
+### If Access Model is A2 — complete both questions
 
-**Signup model:** Open — anyone can verify an email and submit. There is no invite list and no admin-created account.
+N/A — this tool is A3.
+
+---
+
+### If Access Model is A3 — define all roles
+
+| Role name | Who this is | Named first holder (name, work email) | What they can see | What they can do |
+|-----------|------------|----------------------------------------|-------------------|-----------------|
+| EHS Manager | Reviews supplier submissions for EHS-relevant risk | Isabela — isabela@gmail.com | Overview, Risk Flag Board, Register, every submission's full detail, the review status and comment history | Set review status (Accepted / Needs review), write the review comment; everything else is read-only |
+| ESG | Reviews supplier submissions for ESG-relevant risk; leads the programme | Isa — isadorapined@gmail.com | Same as EHS Manager | Same as EHS Manager |
+| Procurement | Uses the review outcome to decide which suppliers to engage commercially | isabel — isabel@gmail.com | Same as EHS Manager and ESG — Overview, Risk Flag Board, Register, every submission's full detail, the review status and comment history | Nothing. No status control, no comment field, no admin panel. View-only in the UI **and** refused at the database function if attempted directly. |
+| Admin *(a capability, not a fourth role)* | Layered on top of exactly one EHS or ESG account at a time. Today: Isa (ESG). | Same person as their base role | The Admin Panel: the full list of team members, their role and active/inactive status | Invite a new team member (create login, assign role); deactivate a team member's access; reset a team member's password; reassign anyone's role or move the Admin capability to someone else |
+
+> The named first holder is what the Access Architect reads; a group is not an answer.
+
+**Admin capability — exactly one holder, always:**
+- Exactly one account holds Admin at any time. Granting it to someone else automatically revokes it from whoever had it.
+- Admin cannot be switched off for the only current admin without switching it on for someone else in the same action — the team can never be left with zero admins.
+- Admin is additive: it never replaces the holder's EHS or ESG review rights.
+
+---
 
 ### Tier
 
-**Tier:** 3 (D3+A2) — **changed from Tier 2.**
+**Tier:** 3 *(unchanged)*
+
+| Tier | D+A combination | Stack | Deployment |
+|------|----------------|-------|------------|
+| 1 | D1+A1 or D2+A1 | Netlify only | Netlify |
+| 2 | D3+A1 | Netlify + Supabase (no auth) | Netlify |
+| 3 | D3+A2 or D3+A3 | Netlify + Supabase (auth + RLS) | Netlify |
+
+> D3+A2 and D3+A3 are both Tier 3. This iteration moves within the same tier — no new infrastructure category, but it does add the tool's first server-side function (Section 3).
+
+---
 
 ### Standalone or Stack
 
-**This tool is:** Standalone — unchanged. Same existing Supabase project (`smnrfopzzzhazkehcqqn`, "The Corporate"), no new project.
+**This tool is:** Part of a stack — see Section 4. *(unchanged)*
 
 ---
 
 ## Section 3 — Arms
 
-No arms change in this iteration. Note for Claude Code: **the magic link email is not an Email Arm.** It is sent by Supabase Auth's own mechanism (configured in Section 6 below), not by a Resend-triggered Netlify or Edge Function. Do not build a custom Email Arm for it. The Email Arm, Export Arm, AI API Arm and Scheduled Automation Arm all remain **Not Active**, as in v3.0.
+Arms are capabilities added to the tool. They do not change the tier.
+
+> **Document search and AI knowledge bases are outside this framework version.** Not requested for this tool.
+
+---
+
+### AI API Arm
+
+**Active:** No *(unchanged)*
+
+---
+
+### Export Arm
+
+**Active:** No. On-screen viewing only. No CSV or PDF download of any kind. *(unchanged)*
+
+---
+
+### Email Arm
+
+**Active:** No. The dashboard sends no email — not for supplier communication, and not for the new invite/reset flows either. Invite and password handover stay a manual, offline step (Slack or in person), exactly as they were when the builder did it from the Supabase dashboard; only *where* the admin triggers it changes. *(scope confirmed unchanged from v1.1 during the v2.0 interview)*
+
+---
+
+### Scheduled Automation Arm
+
+**Active:** No. The automatic superseding rule (Section 9.2) is a database trigger, not a scheduled job. *(unchanged)*
+
+---
+
+### New in v2.0 — Admin / User-Management capability *(not one of the four standard arms)*
+
+This isn't AI, export, email, or scheduled automation, but it is genuinely new infrastructure and needs the same rigor: it is the first time this tool calls a privileged API on the user's behalf.
+
+| Detail | Answer |
+|--------|--------|
+| What it does | Invite a team member (creates their Supabase Auth login and their role row), deactivate a team member (bans their Auth login and marks their role row inactive), reset a team member's password (generates a new starter password), reassign a team member's role or Admin status |
+| What triggers it | The Admin clicking a button in the Admin Panel — always user-triggered, never automatic |
+| Function placement | **Netlify Function.** All four actions require Supabase's Admin API, which needs the **service role key** — a key that must never reach the browser. The function receives the caller's session, verifies server-side (never trusting anything the browser sends) that the caller is authenticated **and** currently holds Admin, then performs the privileged action using the service role key |
+| Who can call it | Only the current Admin. The function checks this itself on every call — it does not rely on the UI hiding the button, since a hidden button is not a security boundary |
+| What "deactivate" does | Two things together: sets `is_active = false` on the person's row in the new roles table, **and** bans their Supabase Auth account (via the Admin API) so they cannot log in at all, even with a valid password. Reactivating reverses both. |
+| What "reset password" does | The function generates a new starter password via the Admin API and returns it once to the Admin's screen (never emailed, never logged); the Admin hands it to the person directly, exactly as today, just triggered from the tool instead of the Supabase dashboard |
+| Failure handling | Any failure (network, Supabase API error, the caller losing Admin mid-request) is shown plainly to the Admin with no partial effect — the function either completes an action fully or leaves the prior state untouched. No retries, no queue. |
+
+> The service role key must never appear in any HTML, JavaScript, or publicly accessible file. It is stored as a Netlify environment variable and read only inside the Netlify Function (Section 11). Claude Code must enforce this.
 
 ---
 
 ## Section 4 — Stack and Deployment
 
-Unchanged except the Tier 3 stack line now applies: **Netlify + Supabase (auth + RLS)** rather than "no auth." Same existing Supabase project, same Netlify site. No new environment variables are required for this change — Supabase Auth's magic link works with the existing `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` pair already in place.
+*(unchanged from v1.1 — same repo, same Netlify site, same Supabase project)*
 
-**Supabase plan:** Free — unchanged. Explicitly confirmed by the builder that this is testing-scale traffic for now, so Supabase's own built-in auth mailer (low rate limit, not meant for real production volume) is acceptable. **This is a stated limitation, not an oversight** — see Section 6 and Known Issues in PROGRESS.md.
+### All Tiers
+
+| Detail | Answer |
+|--------|--------|
+| Frontend framework | React + Vite + Tailwind CSS + shadcn/ui (same stack as the portal) |
+| Deployment target | Netlify — its own site, separate from the portal's `the-corporate-sep` site |
+| Netlify MCP | Not active — deployment will be done manually through the Netlify dashboard |
+| Platform owner | Isa, personally |
+
+**GitHub:** This is an iteration — the dashboard keeps its existing repo. Do not create a new one.
+
+---
+
+### CONDITIONAL: Supabase project — only complete if Tier 2 or Tier 3
+
+**Supabase project status:** Existing — the same project as v1.1.
+
+**Supabase plan:** Free — unchanged. Pauses after roughly one week of no traffic; a pause affects both tools (the portal and this dashboard) at once.
+
+**If existing:**
+
+| Detail | Answer |
+|--------|--------|
+| Project name | The Corporate |
+| Project ID | `smnrfopzzzhazkehcqqn` (URL `https://smnrfopzzzhazkehcqqn.supabase.co`) |
+| supabase-setup.md location | docs/supabase-setup.md in the project folder |
+
+> Claude Code will read supabase-setup.md before making any schema changes. It will not recreate tables or policies that already exist.
+
+---
+
+### CONDITIONAL: Only complete if this tool is part of a stack
+
+*(unchanged from v1.1)*
+
+**Stack name / Supabase project name:** The Corporate
+
+**This tool's role in the stack:** Tool B — internal review dashboard
+
+**Other tools in this stack:**
+
+| Tool | Tier | Role in the stack |
+|------|------|------------------|
+| The Corporate Supplier Sustainability Portal 2026 (Tool A) | Tier 2 | Public, no-login submission portal. Created the schema. Writes to `companies` and `submissions`. |
+| The Corporate Supplier Review Dashboard 2026 (Tool B — this tool) | Tier 3 | Internal, login-protected review dashboard, now with roles. |
+
+**Build order status:** satisfied — no change needed; this iteration only adds to the existing schema.
 
 ---
 
 ## Section 5 — Data Architecture
 
-No new tables. Two things the Access Architect's full run must resolve when it writes the real RLS policy for `submissions`:
+### CONDITIONAL: Only complete if Data Model is D3
 
-1. **The `submissions` INSERT policy changes role.** Today it is `anon` with `check (true)` — this is the actual open-door problem this session closes. It must become an `authenticated`-role policy: only a session with a verified email may insert.
-2. **The verified identity must be provably tied to the row**, not just to the UI. Locking the `contact_email` field in the browser (Section 8) stops an honest supplier from typing a different address, but it does not stop a direct API call from posting a mismatched `contact_email` under a verified session. The Access Architect's full run should decide the mechanism — e.g. a `SECURITY DEFINER` function analogous to `resolve_company()` that reads `auth.email()` server-side rather than trusting a client-supplied value, or a trigger that overwrites `contact_email` with `auth.email()` on insert. **Recorded here as a requirement, not solved here** — this is exactly the kind of decision the Access Architect and Claude Code, not the Tool Architect, should make against the real schema.
+**Existing data the dashboard reads (owned by the portal — unchanged, do not alter):**
 
-**Main record and its states:** unchanged — one row = one submission, no states, submissions are final on insert (no draft/review workflow inside the portal).
+*(identical to v1.1 — see `companies` and `submissions` columns already documented in docs/supabase-setup.md)*
 
-**Login-ready columns:** Since a submitted row is never revisited or edited by the supplier, the standard `created_by` / `updated_by` / `status` audit set is more than this tool needs. What it does need is proof of verification on the row itself — at minimum the verified email is already captured via the locked `contact_email` field (point 2 above ties it properly); whether a separate `auth_user_id` column is also worth adding is left to the Access Architect's full run.
+**Data added in v1.1 (unchanged in v2.0):** `submissions.status`, and the full `submission_status_changes` table (see docs/supabase-setup.md).
 
-**File storage:** unchanged — none.
+**New data this build (v2.0) adds:**
+
+| Field name | Plain language label | Data type | Who provides it | Required? |
+|-----------|---------------------|-----------|----------------|-----------|
+| `user_roles.id` | Row ID | UUID (auto) | Automatic | Yes |
+| `user_roles.auth_user_id` | Which login this row belongs to | UUID (FK → `auth.users.id`, unique) | Automatic, set when the admin invites the person | Yes |
+| `user_roles.email` | The person's email, stored alongside the login for display in the Admin Panel | Text | Admin, at invite time | Yes |
+| `user_roles.role` | `ehs`, `esg`, or `procurement` | Text, check-constrained to those three values | Admin, at invite time; changeable later | Yes |
+| `user_roles.is_admin` | Whether this account currently holds the Admin capability | Boolean, default `false` | Admin, when reassigning | Yes |
+| `user_roles.is_active` | Whether this account's access is currently live | Boolean, default `true` | Automatic (`true` on invite); Admin (`false` on deactivate, `true` on reactivate) | Yes |
+| `user_roles.created_at` | When the account was invited | Timestamp, default `now()` | Automatic | Yes |
+| `user_roles.updated_at` | When the role row was last changed | Timestamp | Automatic, on every update | Yes |
+
+**Tables needed:**
+
+| Table name | What it stores | Key fields |
+|-----------|---------------|-----------|
+| `companies` | *Existing, unchanged.* | — |
+| `submissions` | *Existing, unchanged since v1.1.* | — |
+| `submission_status_changes` | *Existing, unchanged since v1.1.* | — |
+| `user_roles` | *New in v2.0.* One row per team member's login. Exactly one row may have `is_admin = true` at any time — enforced by a partial unique index or a check inside the admin function, never left to the UI alone. | auth_user_id, email, role, is_admin, is_active |
+
+**Database logic this build adds (Claude Code builds via MCP):**
+
+1. **`user_roles` table**, as above, with a constraint or trigger guaranteeing at most one `is_admin = true` row exists at any time, and that unsetting the only admin in the same statement that doesn't set a new one is refused (this is a data-integrity rule, not just a UI rule — it must hold even if called directly).
+2. **Row-restricted read policy on `user_roles`:** an authenticated user may read only their own row (`auth_user_id = auth.uid()`), so the client can show or hide the Admin Panel entry point and label the person's own role. No authenticated user — Admin included — reads the full roster through this policy; the Admin Panel's roster comes from the Netlify Function (which uses the service role key and bypasses RLS by design, after checking the caller is Admin).
+3. **No direct authenticated writes to `user_roles`.** All inserts, updates and deletes happen only through the Netlify Function using the service role key. There is no RLS policy granting authenticated insert/update/delete on this table — the table simply has none, so any attempt is refused by default.
+4. **`set_submission_status()` — updated.** In addition to its existing v1.1 refusals (null `auth.uid()`, target other than `accepted`/`needs_review`, blank reason for `needs_review`, no-op, superseded submission), it now also refuses unless the caller's `user_roles` row has `role` in (`ehs`, `esg`) **and** `is_active = true`. Procurement and any deactivated account are refused at the function, not only hidden in the UI.
+5. **`submission_status_changes.reason`** is unchanged structurally, but is now the field referred to in the UI as "review comment" — same column, new label, now writable only by EHS/ESG (enforced by rule 4 above, since it is only ever written by `set_submission_status()`).
+
+**File storage:** No — unchanged.
+
+**Derived or calculated data:** Unchanged from v1.1, plus: whether the current user is Admin, and what role they hold, is read once per session from their own `user_roles` row and used only to decide what the UI shows — never trusted as the sole enforcement, since Section 5 rule 4 enforces it again at the database.
 
 ---
 
 ## Section 6 — Access and Permissions
 
+### CONDITIONAL: Only complete if Access Model is A2 or A3
+
 **Auth configuration:**
 
 | Detail | Answer |
-|---|---|
-| Login, as built | **Magic link (passwordless) — not the template's default email+password.** Supabase Auth: "Enable sign-ups" **ON** (open signup is the whole point), email OTP / magic link flow enabled, **Confirm email** behaviour handled by the magic link itself. **Deviation from the standard build method, and why:** the template's default (email+password, admin-managed, sign-ups off) assumes an admin invites a small known list of people — that does not fit an open, public, unknown-supplier context at all. Magic link is what the framework itself recommends for exactly this case: external users who must prove their email, open signup, no passwords to manage. |
-| Sender | **Supabase's own built-in auth mailer — not a Resend-verified domain.** Explicitly confirmed by the builder: this is testing-scale traffic only for now, so the low rate limit is acceptable. This is the tool's known ceiling, not a gap — flagged in PROGRESS.md's Known Issues so a future session doesn't mistake failed sends for a bug. |
-| Login, upgrade path | Same magic link mechanism, moved onto a Resend-verified sending domain once real supplier volume needs it (~$10/year, one-time domain setup). Nothing about the flow or the rules changes when this happens — only the sender. |
-| No Change Password screen | Not applicable — there are no passwords. This removes that entire piece of the standard Tier 3 build. |
-| Named first holders | Not applicable — open public signup, no admin-invited individual. The population pattern for the Access Architect's short/full run is: **open self-verification** — anyone may become a verified session by proving an email, with no fixed list and no roles beyond the one. |
-| Roles | One: **Verified Supplier.** Sees and does exactly what an anonymous submitter could under v3.0 — nothing is restricted further. The only change is that the session is now tied to a proven mailbox. |
-| When it is built | Together with the updated row rules, per the Access Architect's full run — not ahead of it. |
+|--------|--------|
+| Login, as built | Email and password, admin-managed — unchanged. **What changes:** inviting a person, deactivating them, resetting their password, and reassigning their role now happen from the in-app **Admin Panel** (via the Netlify Function in Section 3), instead of the Supabase dashboard's Authentication → Users screen. The mechanics underneath are the same admin-managed model; only the door the admin uses changed. |
+| Named first holders | EHS Manager — Isabela, isabela@gmail.com. ESG (holds Admin) — Isa, isadorapined@gmail.com. Procurement — isabel, isabel@gmail.com. |
+| Signup model | Invite-only, unchanged. "Allow new users to sign up" stays off at the Supabase Auth level — the Admin Panel calls the Admin API server-side, which is a separate path from public signup and is unaffected by that setting. |
+| Login, upgrade path | Unchanged from v1.1 — the team is small (three people); email-and-password admin-managed remains appropriate. Revisit (magic link, OAuth, or SSO) only if the team grows meaningfully beyond this size. |
 
-**Privacy note:** Supabase Auth now stores a verified email per session. This is personal data, and because this is an **open-signup** tool it is what triggers Section 7's scope rule below — flagged explicitly to the builder, who confirmed the "not applicable" GDPR outcome anyway (see Section 7).
+> **Privacy note:** User accounts store an email address, a role, and admin/active status. For internal and client tools this falls under the organisation's existing privacy framework rather than a consent flow.
 
-**Roles and access:**
+**RLS rules — who can read and write what:**
 
-| Role | What they broadly see and do |
-|---|---|
-| Verified Supplier | Same as v3.0's anonymous submitter: chooses a path and door, completes the Company & Contact step (now pre-filled and locked to their verified email), completes the assessment, submits. Cannot see or affect any other supplier's data. |
+RLS stays enabled on every table, and is never disabled. Rows unchanged from v1.1 (`companies`, `submissions`, `submission_status_changes` for the anon role) are not repeated here — only what changes or is new.
 
-The row-level rule itself (the `submissions` INSERT policy moving from `anon` to `authenticated`, and the mechanism tying `contact_email` to the verified identity from Section 5) lives in `access-matrix.md`, written by the Access Architect's **full run** — triggered here because a real login now exists, not just the short run v3.0 already had when D3 was first set.
+| Table | User type | Can read | Can insert | Can update | Can delete |
+|-------|----------|----------|------------|------------|------------|
+| `companies` | Any authenticated user (EHS, ESG, Procurement) | All rows — unchanged | No | No | No |
+| `submissions` | Any authenticated user | All rows — unchanged | No | No — status changes only through `set_submission_status()`, and only for EHS/ESG (Section 5, rule 4) | No |
+| `submission_status_changes` | Any authenticated user | All rows — unchanged (Procurement can read the review comment, just never write it) | No | No | No |
+| `user_roles` | Unauthenticated (anon) | No | No | No | No |
+| `user_roles` | Any authenticated user | **Own row only** (`auth_user_id = auth.uid()`) | No | No | No |
+| `user_roles` | The Netlify admin function (service role key) | All rows | Yes — on invite | Yes — on deactivate/reactivate/reassign | No — deactivate, never delete (Section 3) |
+
+The dashboard reads with the logged-in user's session through the anon/publishable key for everything except the four admin actions, which go through the Netlify Function using the service role key. The service role key is never used directly by the browser.
 
 ---
 
 ## Section 7 — GDPR
 
-**GDPR outcome:** **Not applicable — confirmed by the builder as a class/portfolio project.**
+### MANDATORY DECISION: Complete this section for every D3 tool.
 
-**Flagged and reconfirmed:** the framework's own scope rule says an open-signup tool with login identities normally *does* trigger this section (login emails are personal data, and open signup doesn't get the invite-only exemption that would otherwise cover them). This was raised explicitly with the builder before finalizing this spec. The builder reconfirmed "not applicable, class/portfolio project" with that rule in view. Recorded here as a conscious, informed override rather than an unexamined "no."
+**GDPR outcome:** Not applicable — unchanged from v1.1. This iteration adds a role, an admin flag and an active flag to each team member's account; these are organisational metadata about an internal, invite-only login, not a new category of personal data. The dashboard still collects no personal data through any form or upload — it only displays what the portal already collected and manages the internal team's own login accounts, which is already covered by Section 6's privacy note.
 
 ---
 
 ## Section 8 — Screen and UI Structure
 
-Only new or changed views are described here. Every other view (Landing, Path Selection, Doors 3a/3b/5/6's non-identity content, Views 5–7, Confirmation) is unchanged from v3.0 — see `docs/product-spec.md`.
+Unchanged: the Login view, the three-section Dashboard, and the supplier detail page (Section 8 of v1.1) all still exist exactly as specified there. What changes:
 
-### NEW — Verify Your Email
+### View 2 — Dashboard — Section C — Register and Detail page (updated)
 
-- **Purpose:** The first thing a supplier does, before anything else — prove they own a real inbox.
-- **What is visible:** A single email input field, a submit button, the same transparency-notice styling used elsewhere in the tool.
-- **User actions:** Enter an email address, submit.
-- **What happens next:** A Supabase Auth magic link is sent to that address. The screen moves to the "Check Your Inbox" state below. Sits in front of the existing Landing/Path Selection screens — a supplier reaches this before choosing EcoVadis or the full assessment.
+- **What changes for EHS/ESG:** No change from v1.1 — the status controls and the review-comment field remain exactly as before.
+- **What changes for Procurement:** The detail page renders identically (status badge, review comment, timeline), but with no controls. No "Save status" button, no editable comment field, no way to trigger `set_submission_status()`. This is enforced in the UI **and** independently by the database function (Section 5, rule 4) — a Procurement account calling the function directly (for example via the browser console) is refused the same as if the button existed and were clicked.
+- The top bar now also shows the logged-in user's role next to their email (e.g. "isabela@gmail.com · EHS").
 
-### NEW — Check Your Inbox
+### View 4 — Admin Panel *(new)*
 
-- **Purpose:** Tell the supplier a link was sent and what to do with it.
-- **What is visible:** Confirmation that an email was sent to the address just entered, an instruction to open it **on the same device** (cross-device handling is explicitly not built this session — confirmed acceptable by the builder; a line of copy is enough), and a resend action.
-- **User actions:** Click the magic link in their inbox. Or, if nothing arrives, use the **resend** action, which sends a fresh link to the same address.
-- **What happens next:** Clicking a valid, unused link authenticates the session and drops the supplier directly into the existing Path Selection screen (View 2) — not back to the Landing page. Clicking an expired or already-used link shows the "Link No Longer Valid" state below instead.
-
-### NEW — Link No Longer Valid
-
-- **Purpose:** Handle an expired or reused magic link without a confusing failure.
-- **What is visible:** A plain message that the link has expired or was already used, and an instruction to go back and request a new one.
-- **User actions:** Return to "Verify Your Email" and start again.
-- **What happens next:** Standard email-entry flow resumes from the top.
-
-### CHANGED — Company & Contact step (all four doors)
-
-- **What changed:** The `contact_email` field is now **pre-filled and read-only**, populated from the verified session's email rather than typed in freely. Legal name, registered country, contact name and contact title remain free text, unchanged. This is what ties a stored submission to the mailbox that was actually checked, per the builder's explicit decision.
-- Everything else about this step (five fields, validation, gating before door-specific content) is unchanged from v3.0.
+- **Purpose:** Let the current Admin manage the team's accounts without touching the Supabase dashboard.
+- **What is visible:** Visible only to the account currently holding Admin — for everyone else, there is no link to this view and no route reaches it (a direct visit redirects to the Dashboard). A table of every team member: email, role, Admin (yes/no), Active (yes/no), invited-on date.
+- **User actions:**
+  - **Invite:** a form (email + role) that creates the login and the `user_roles` row. On success, shows the generated starter password once, with a reminder to hand it over directly and that it will not be shown again.
+  - **Deactivate / Reactivate:** a toggle per row (except the admin's own row, which cannot deactivate itself without first handing Admin to someone else).
+  - **Reset password:** a button per row that generates a new starter password and shows it once, the same way invite does.
+  - **Reassign role:** a dropdown per row (EHS / ESG / Procurement).
+  - **Move Admin:** a control that grants Admin to another EHS/ESG row and simultaneously revokes it from the current holder. Blocked if the target account is inactive or is Procurement (Admin can only sit on an EHS or ESG account).
+- **What happens next:** Every action calls the Netlify Function (Section 3) and refreshes the table from its response. A failed action shows the error plainly and changes nothing.
 
 ---
 
 ## Section 9 — Logic and Calculations
 
-Not applicable to this change — unchanged from v3.0.
+Sections 9.1–9.4 (status lifecycle, superseding, risk flags, overview counts) are unchanged from v1.1.
+
+### 9.5 — Role permissions *(new)*
+
+**What is calculated:** Whether the current user may see the Admin Panel and whether they may change a submission's status/comment.
+
+**Inputs:** The current user's own `user_roles` row (`role`, `is_admin`, `is_active`), read once at login and re-checked by the database on every write attempt.
+
+**Rules:**
+- `role` in (`ehs`, `esg`) and `is_active = true` → can set status and write the review comment.
+- `role = 'procurement'`, or any role with `is_active = false` → view-only everywhere; no controls rendered; the function refuses if called directly.
+- `is_admin = true` → sees and may use the Admin Panel, in addition to whatever their `role` otherwise permits.
+
+**Edge cases:**
+- **Role changes mid-session:** because the check is a live read against `user_roles` (never baked into a long-lived token), a reassignment takes effect on the person's very next action — they do not need to log out and back in.
+- **Deactivation mid-session:** the person's Supabase Auth session is banned server-side by the admin action, so their next request (page load or API call) fails authentication entirely, not just the role check.
+- **The only admin's own row:** the UI blocks self-deactivation and blocks removing one's own Admin status without naming a successor in the same action; the database also refuses it (Section 5), so this cannot be bypassed by calling the function directly.
 
 ---
 
 ## Section 10 — Brand and Visual Direction
 
-Unchanged. The three new screens (Verify Your Email, Check Your Inbox, Link No Longer Valid) follow the existing data-leaf-brand skill and tokens — same palette, same type, same voice (analytical, no exclamation points, no emoji).
+Unchanged from v1.1. The Admin Panel uses the same Data Leaf tokens as every other view — no new colours or type.
 
 ---
 
 ## Section 11 — API and Credentials
 
-No new credentials required for this session. Supabase Auth's magic link works off the existing Supabase publishable/anon key already configured. **Not needed yet, recorded for the upgrade path:** a Resend account and a verified sending domain, once traffic moves beyond testing scale — this is a pre-build task for whichever future session makes that switch, not this one.
+| Service | What it does in this tool | Key required | Where key is stored |
+|---------|--------------------------|-------------|-------------------|
+| Supabase | Database reads, status writes via `set_submission_status()`, email-and-password Auth | Anon / publishable key (public, browser-safe) | Netlify environment variables `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, plus `.env.local` (gitignored) for local dev — unchanged from v1.1 |
+| Supabase Admin API *(new in v2.0)* | Invite, deactivate, reset password, and reassign role — the four Admin Panel actions | **Service role key** — server-side only, bypasses RLS, must never reach the browser | Netlify environment variable, read only inside the new Netlify Function; never `VITE_`-prefixed, never in any committed file |
+
+> **Security rule — no exceptions:** No API key, token, password, or credential may appear in any HTML file, any JavaScript file, or any file committed to GitHub. Claude Code must enforce this regardless of tier or context.
+
+**Environment variable contract:**
+
+| Variable name (exact) | Read by | Set where | Public or secret |
+|-----------------------|---------|-----------|------------------|
+| `VITE_SUPABASE_URL` | the browser | Netlify env — unchanged | public |
+| `VITE_SUPABASE_ANON_KEY` | the browser | Netlify env — unchanged | public |
+| `SUPABASE_SERVICE_ROLE_KEY` *(new)* | the Netlify Function only | Netlify env — added in this build | **secret** — copied with the Supabase dashboard's copy button, never by mouse selection, same lesson as the anon key in v1.1 |
+
+**Credentials readiness:**
+
+| Credential | Status | Where to get it |
+|-----------|--------|----------------|
+| Supabase URL + anon key | Available — the same values already in use | — |
+| Supabase service role key | Available — exists on the project already, simply unused until now | Supabase dashboard → Project Settings → API (copy button) |
+| Team login accounts | Isa's account likely already exists from v1.1; Isabela and isabel's accounts are created fresh through the new Admin Panel once it is built | Admin Panel, once built (see Section 15 open question) |
 
 ---
 
-## Section 12 — Out of Scope — This Iteration
+## Section 12 — Out of Scope — Phase 2
 
 | Deferred feature | Reason it is deferred |
-|---|---|
-| Cross-device magic link handling (started on one device, opened on another) | Confirmed acceptable by the builder — suppliers will be told to open the link on the device they started on |
-| Custom sending domain / Resend integration | Testing-scale traffic only for now; Supabase's built-in mailer is sufficient; this is the documented upgrade path |
-| Password-based login of any kind | Explicitly not wanted — one-time verification, not a returning-user account model |
-| Change Password screen | Not applicable — there are no passwords |
-| Any account settings, profile, or "my submissions" screen | Not requested; a verified session exists only to gate one submission, not to give suppliers an account to manage |
-| Persistent sessions across return visits | Each submission attempt verifies fresh; this is not a login suppliers are expected to reuse over time |
-| Restricting who may verify or submit | Explicitly out of scope — this is validation, not gatekeeping; open signup is the whole design |
+|-----------------|----------------------|
+| In-app "forgot password" self-service reset | Not requested. The admin resets it from the Admin Panel instead. |
+| Automatic email on invite or password reset | Not requested — handover stays manual (Slack/in person), same as v1.1. No email service added. |
+| Audit log of admin actions (who invited/deactivated/reassigned whom, and when) | Not requested for this version. `submission_status_changes` remains the only audit trail; admin actions themselves are not logged beyond the current state of `user_roles`. |
+| More than one simultaneous Admin | Not requested — exactly one at a time, by design (Section 2). |
+| A fourth, dedicated "Admin" role separate from EHS/ESG | Not requested — Admin is a capability layered on an EHS or ESG account, never a standalone role. |
+| Any change to the supplier portal's code, pages, fields, routes, submission flow, workbook or capture screens | Explicitly excluded, unchanged from v1.1. |
+| Messaging or notifying suppliers from the dashboard | Communication about "Needs review" stays outside the platform, unchanged. |
+| Supplier-facing visibility of their status | Unchanged. |
+| CSV or PDF export of any view | Unchanged. |
+| AI features (summarising, classifying or scoring answers) | Unchanged. |
+| Scheduled automation (digests, reminders) | Unchanged. |
+| Weighting, scoring or grading risk flags | Unchanged — still a plain count. |
+| Editing supplier answers or identity from the dashboard | Unchanged — read-only apart from status/comment. |
+| Deleting submissions or companies from the dashboard | Unchanged — still a Supabase dashboard task. |
+| Viewing or downloading attached files | Unchanged. |
+| Per-submission historical contact details | Unchanged. |
 
 ---
 
 ## Section 13 — Acceptance Criteria
 
-Existing v3.0 criteria remain in force and unchanged. New criteria for this iteration:
+Criteria 1–22 from v1.1 (login, signup disabled, anon lockout, overview, flags, register, detail, status lifecycle, superseding, brand, deployment) still apply and are unchanged. New criteria for v2.0:
 
 | # | What to verify | Expected result | Done? |
-|---|---|---|---|
-| 21 | Email entry validates format before sending | Malformed addresses are rejected client-side with a plain message; no send attempted | [ ] |
-| 22 | Magic link email sends on valid submission | Supplier receives an email with a working link within a reasonable time | [ ] |
-| 23 | Clicking a valid, unused link authenticates | Supplier lands on Path Selection (View 2), not the Landing page, with a live session | [ ] |
-| 24 | Clicking an expired or already-used link | "Link No Longer Valid" screen shown, with a path back to email entry | [ ] |
-| 25 | Resend action works | A fresh link is sent to the same address; the prior link becomes invalid or remains subject to normal expiry | [ ] |
-| 26 | Company & Contact email field is locked | `contact_email` is pre-filled from the verified session and not editable, on all four doors | [ ] |
-| 27 | Unauthenticated submission is refused at the database | A direct `submissions` insert attempt with no verified session is rejected by RLS, not just hidden by the UI | [ ] |
-| 28 | Submitted row is traceable to the verifying identity | Given a `submissions` row, The Corporate can confirm the `contact_email` matches a session that actually verified that address (mechanism per Section 5, point 2) | [ ] |
+|---|---------------|-----------------|-------|
+| 23 | EHS/ESG can review | Logged in as Isabela or Isa, the status controls and comment field appear on a submission's detail page and work exactly as in v1.1. | [ ] |
+| 24 | Procurement cannot review — UI | Logged in as isabel, no status control or comment field appears anywhere. Overview, Risk Flag Board, Register and every detail page are fully visible, including existing comment text. | [ ] |
+| 25 | Procurement cannot review — function | Calling `set_submission_status()` directly as isabel's authenticated session is refused, regardless of parameters. | [ ] |
+| 26 | Deactivated account is fully locked out | An admin deactivates a test account; that account's next login attempt fails, and any already-open session's next request also fails — not just a role check, a full authentication failure. | [ ] |
+| 27 | Admin Panel visibility | Only the current Admin sees the Admin Panel entry point and can reach View 4. A direct visit to its URL by anyone else redirects to the Dashboard. | [ ] |
+| 28 | Invite works | Admin invites a test email with a role; a working login is created with that role, `is_active = true`, and the starter password shown once is usable to log in. | [ ] |
+| 29 | Reset password works | Admin resets a test account's password; the old password stops working and the new one shown once works. | [ ] |
+| 30 | Reassign role takes effect immediately | Admin changes a logged-in test account's role from Procurement to EHS; without logging out, that account's next status-change attempt succeeds. | [ ] |
+| 31 | Exactly one admin, always | Attempting to remove Admin from the only current holder without naming a successor is refused, both in the UI and if the function is called directly. Granting Admin to a second account automatically revokes it from the first. | [ ] |
+| 32 | Admin cannot self-lock-out | The current Admin cannot deactivate their own account, and cannot drop their own Admin status without handing it to someone else in the same action. | [ ] |
+| 33 | No client-side roster leak | An authenticated non-admin account's direct query against `user_roles` returns only their own row, never the full team list. | [ ] |
+| 34 | Service role key never exposed | The built site's JavaScript bundle contains no occurrence of the service role key; it exists only in the Netlify Function's server-side environment. | [ ] |
 
 ---
 
 ## Section 14 — Build Path
 
-**This tool's tier:** 3 (D3+A2) — up from Tier 2.
+**This tool's tier:** Tier 3 *(unchanged)*
 
-### Pre-build steps for this iteration
+> **Note on the Access Architect:** v1.0/v1.1 of this tool were built as a single-run spec, without a separate `access-matrix.md`/`user-stories.md` pass — the RLS grid was derived directly in Section 6, as the template's fallback allows for a project already following that pattern. This iteration continues that same pattern for consistency. Given the added complexity here — a real admin capability with service-role privileges and role-gated writes — it would also be reasonable to run the Access Architect's short run now before handing this spec to the Project Governor, even though the earlier versions didn't use it. That's the builder's call; either path is workable, but the Access Architect would give the new `user_roles` table and its policies an extra, purpose-built review.
 
-- [x] Tool Architect interview complete, this spec confirmed by the builder
-- [ ] **Access Architect — FULL RUN**, not the short run. `docs/supabase-setup.md` already exists and someone is now going to log in (verify), which is exactly what triggers the full run. It extends the existing matrix with: the open self-verification population pattern, the `submissions` INSERT policy moving from `anon` to `authenticated`, and the mechanism tying `contact_email` to the verified session (Section 5, point 2).
-- [ ] Project Governor, **Iteration Mode** — reads this spec plus the updated `access-matrix.md`, updates `CLAUDE.md` and `PROGRESS.md` in place (history preserved, not reset)
-- [ ] This file (`product-spec-v3.1.md`) uploaded to the existing GitHub repo root alongside the updated `access-matrix.md` / `user-stories.md`
-- [ ] No new Netlify or Supabase credentials to add by hand for this session
+---
 
-### Build session — collapsed Tier 3 stages
+### Pre-build steps — complete these before opening Claude Code
 
-This iteration does not add a new screen that shows other people's records, so the usual Stage 2 ("second screen on fixture data") does not apply here — there is no reviewer/admin screen being introduced. This session goes straight from the existing database (already built, Stage 1 equivalent) into:
+- [ ] This spec (v2.0) confirmed by the builder
+- [ ] Optional but recommended given the scope: Access Architect short run against `user_roles` and the updated `set_submission_status()` rule
+- [ ] Project Governor skill — updated CLAUDE.md and PROGRESS.md produced from this spec, in **Iteration Mode** (keeps existing PROGRESS.md history)
+- [ ] This spec (v2.0) uploaded to the existing GitHub repo root, replacing v1.1
+- [ ] Updated CLAUDE.md and PROGRESS.md uploaded to the repo root
+- [ ] No new GitHub repo — this is an iteration of the existing dashboard repo
+- [ ] All credentials identified: the service role key is available on the existing Supabase project, just not yet used by this tool (Section 11)
 
-**Stage 3 — the door and the updated row rule, together**
-- [ ] Claude Code, in one build: configures Supabase Auth for magic link (sign-ups on, email OTP/magic link enabled, no password flow), builds the three new screens (Verify Your Email, Check Your Inbox, Link No Longer Valid), updates the Company & Contact component so `contact_email` is sourced from the verified session and read-only, updates the `submissions` RLS policy from `anon` to `authenticated` per the Access Architect's matrix, and implements the mechanism tying `contact_email` to `auth.email()` (Section 5, point 2)
-- [ ] **Gate, before deploying:** attempt a direct `submissions` insert as `anon` (must be refused) and as an authenticated session with a mismatched `contact_email` (must be refused or corrected server-side, per whichever mechanism was chosen) — paste results into `PROGRESS.md`
-- [ ] Test the full flow locally: verify → land on Path Selection → complete a door → confirm the row lands correctly
-- [ ] Push to main → Netlify auto-deploys
-- [ ] Update `docs/supabase-setup.md` with the new RLS policy and any new function, in the same save point (the database was touched)
+---
+
+### Tier 3 — build session (this iteration)
+
+- [ ] Open Claude Code in the existing project folder
+- [ ] Claude Code reads product-spec.md (v2.0), CLAUDE.md, and PROGRESS.md, and docs/supabase-setup.md before touching the database
+- [ ] Claude Code builds the `user_roles` table via Supabase MCP, with RLS as specified in Section 6, and the single-admin constraint
+- [ ] Claude Code updates `set_submission_status()` to add the EHS/ESG-and-active check
+- [ ] Claude Code creates the new Netlify Function for the four admin actions, wired to the service role key as a Netlify environment variable
+- [ ] Claude Code updates docs/supabase-setup.md with the new table, policies, and the updated function
+- [ ] Claude Code builds the Admin Panel (View 4) and updates the Register/detail views to hide controls for Procurement
+- [ ] Builder adds `SUPABASE_SERVICE_ROLE_KEY` to Netlify's environment variables (copied with the dashboard's copy button)
+- [ ] Builder confirms Isa's existing account (if any) gets a `user_roles` row with `role = 'esg'`, `is_admin = true`; Isabela and isabel are invited fresh through the new Admin Panel once it exists
+- [ ] Test locally, including acceptance criteria 23–34, before deploying
+- [ ] Push to main → Netlify auto-deploys; "Deploy project without cache" after the env var change
+- [ ] Optional post-build: run Supabase QA skill to verify the new table's RLS and the function's grants
 
 ---
 
 ## Section 15 — Open Questions
 
-None blocking. All decisions in this document were confirmed by the builder during the interview.
+| Question | Who answers it | Blocking? |
+|----------|---------------|-----------|
+| Does Isa's existing v1.1 login already exist in Supabase Auth, or does it also need to go through the new invite flow? | Builder | No — resolvable during build by checking Authentication → Users |
+| Should the single-admin constraint be a hard database constraint (e.g. a partial unique index on `is_admin = true`) or enforced only inside the Netlify Function's transaction logic? | Builder / Claude Code | No — Claude Code should default to the database constraint for defense-in-depth, per Section 5 |
+| *(Carried forward from v1.1, still open)* Should the `isa` test company and its submission be removed before real use? | Builder | No |
+| *(Carried forward from v1.1, still open)* Free plan pauses after about a week idle and takes both tools down. Revisit if used for real. | Builder | No |
 
 ---
 
 ## Section 16 — Tool Version History
 
-> Earlier rows are reconstructed from `CLAUDE.md`, `PROGRESS.md` and `docs/supabase-setup.md` context rather than copied from the original `docs/product-spec.md`, which was not available when this iteration spec was written. Verify against that file if precision on the earlier entries matters.
-
 | Version | Date | What changed in the tool |
-|---|---|---|
-| v1.0 / v2.1 | (prior to this session) | Initial build and subsequent visual/structural revision — Tier 1/2 groundwork; v2.1 remains binding for View 1 and Section 10 per v3.0's own reference |
-| v3.0 | September 2026 (session 3–4) | Added Supabase persistence: `companies` and `submissions` tables, RLS, `resolve_company()`. Promoted Tier 1/2 → Tier 2 (D3+A1) |
-| **v3.1** | **24 September 2026** | **This spec.** Added email verification via Supabase Auth magic link ahead of the existing flow. Promoted Tier 2 (D3+A1) → **Tier 3 (D3+A2)**. `contact_email` on the Company & Contact step is now locked to the verified session. `submissions` INSERT policy to move from `anon` to `authenticated` per the Access Architect's full run. |
+|---------|------|--------------------------|
+| v1.0 | 18 September 2026 | Initial build |
+| v1.1 | 18 September 2026 | Pre-build correction from verification against the portal's `src/lib`. §9.3 flag rules rewritten for the guided form's non-Yes/No options. EcoVadis keys and label source named. Acceptance criterion 7 extended. |
+| v2.0 | 25 September 2026 | Access model changed A2 → A3. Added roles EHS Manager, ESG and Procurement with different permissions: EHS/ESG can set review status and write the review comment; Procurement is view-only everywhere, enforced both in the UI and at `set_submission_status()`. Added an Admin capability (exactly one EHS/ESG account at a time) with a new in-app Admin Panel to invite, deactivate, reset passwords, and reassign roles — backed by a new `user_roles` table and the tool's first server-side function (Netlify Function using the Supabase service role key). No email arm added; invite/reset handover stays manual. |
 
 ---
 
-*This spec is written for Claude Code. Combined with `docs/product-spec.md` (v3.0) and `docs/product-spec-v2.1.md`, it assumes zero prior context beyond those two files.*
+*This spec is written for Claude Code. It assumes zero prior context. Every decision, rule, and requirement must be explicit enough that the builder can hand this document to Claude Code without a single verbal explanation.*
